@@ -9,7 +9,6 @@ from tracker.alerts import send_daily_digest, send_instant_alerts
 from tracker.config import SCORE_DAILY_DIGEST, SCORE_INSTANT_ALERT
 from tracker.scorer import compute_market_averages, score_listing
 from tracker.sources.carfax import fetch_carfax
-from tracker.sources.enterprise import fetch_enterprise
 from tracker.sources.marketcheck import fetch_marketcheck
 from tracker.store import (
     get_market_snapshot,
@@ -39,8 +38,7 @@ def main() -> None:
 
     sources = {
         "marketcheck": fetch_marketcheck,
-        "carfax": fetch_carfax,       # Apify actor — accident/owner/service history
-        "enterprise": fetch_enterprise,
+        "carfax": fetch_carfax,
     }
 
     with ThreadPoolExecutor(max_workers=5) as executor:

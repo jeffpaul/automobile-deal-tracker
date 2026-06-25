@@ -151,11 +151,9 @@ def score_listing(listing: dict[str, Any], market_avg_for_trim: float | None) ->
             elif drop_pct >= 2:
                 score += 4
 
-    # 8. Source type penalties/bonuses
+    # 8. Source type penalties
     if listing.get("pricing_type") == "no-haggle":
         score -= 5  # CarMax/Carvana: can't negotiate below listing
-    if listing.get("source_type") == "rental-fleet":
-        score += 3  # Enterprise: fleet vehicles typically well-maintained
 
     # 9. Cold Weather Group bonus — practical for Chicago winters
     if listing.get("cold_weather_group"):
@@ -309,8 +307,6 @@ def score_breakdown(listing: dict[str, Any], market_avg_for_trim: float | None) 
     # 8. Source type
     if listing.get("pricing_type") == "no-haggle":
         components.append(("No-haggle pricing", -5))
-    if listing.get("source_type") == "rental-fleet":
-        components.append(("Rental fleet (maintained)", 3))
 
     # 9. Cold Weather Group
     if listing.get("cold_weather_group"):
