@@ -11,7 +11,8 @@
       "Bash(pip install *)",
       "Bash(python3 scripts/validate_keys.py)",
       "Bash(pip3 install *)",
-      "Bash(git commit -m 'chore: update validate_keys to probe actual Carapis catalog API structure *)"
+      "Bash(git commit -m 'chore: update validate_keys to probe actual Carapis catalog API structure *)",
+      "Bash(python3 -c \"import ast, pathlib; [ast.parse\\(f.read_text\\(\\)\\) for f in pathlib.Path\\('tracker'\\).rglob\\('*.py'\\)]; print\\('syntax ok'\\)\")"
     ]
   }
 }

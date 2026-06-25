@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from tracker.alerts import send_daily_digest, send_instant_alerts
 from tracker.config import SCORE_DAILY_DIGEST, SCORE_INSTANT_ALERT
 from tracker.scorer import compute_market_averages, score_listing
-from tracker.sources.carapis import fetch_carapis
+from tracker.sources.carapis import fetch_carapis as _fetch_carapis_all
 from tracker.sources.carfax import fetch_carfax
 from tracker.sources.enterprise import fetch_enterprise
 from tracker.sources.marketcheck import fetch_marketcheck
@@ -39,12 +39,7 @@ def main() -> None:
 
     sources = {
         "marketcheck": fetch_marketcheck,
-        "cargurus": lambda: fetch_carapis("cargurus"),
-        "autotrader": lambda: fetch_carapis("autotrader-com"),
-        "cars_com": lambda: fetch_carapis("cars-com"),
-        "carmax": lambda: fetch_carapis("carmax"),
-        "carvana": lambda: fetch_carapis("carvana"),
-        "truecar": lambda: fetch_carapis("truecar"),
+        "carapis": _fetch_carapis_all,   # unified: covers AutoTrader US, Cars.com, Carvana
         "carfax": fetch_carfax,
         # Enterprise last — scraper, most fragile
         "enterprise": fetch_enterprise,

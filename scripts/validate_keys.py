@@ -174,9 +174,9 @@ if carapis_key:
                 total = data.get("count", data.get("total", "?")) if isinstance(data, dict) else len(data)
                 results = data.get("results", data) if isinstance(data, dict) else data
                 check("GET /apix/catalog_api/vehicles/ (Jeep plug_hybrid 2023+)", True, f"total={total}")
-                for v in results[:2]:
-                    print(f"    {v.get('year','?')} {v.get('brand_slug','?')} {v.get('model_slug','?')} "
-                          f"${v.get('price','?')} source={v.get('source','?')}")
+                if results:
+                    print(f"\n  Sample vehicle keys: {list(results[0].keys())}")
+                    print(f"  Sample vehicle: {json.dumps(results[0], indent=2, default=str)[:800]}")
             else:
                 check("GET /apix/catalog_api/vehicles/", False, f"HTTP {r.status_code}: {r.text[:120]}")
         except Exception as e:
