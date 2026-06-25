@@ -129,14 +129,20 @@ def merge_listings(raw_listings: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if item.get("truecar_market_price"):
                 existing["truecar_market_price"] = item["truecar_market_price"]
 
-            # CARFAX signals (authoritative from carfax source)
+            # CARFAX signals — authoritative when present; don't OR-merge these
+            # (a CARFAX no_accidents=0 must not be overridden by MC's carfax_clean_title=1)
             if item.get("source") == "carfax":
-                for f in ("no_accidents", "one_owner", "service_record_count", "carfax_badge"):
+                for f in ("no_accidents", "one_owner", "carfax_badge"):
                     if item.get(f) is not None:
                         existing[f] = item[f]
+            else:
+                # For non-CARFAX sources, only promote if no CARFAX data seen yet
+                if "carfax" not in (existing.get("_sources") or []):
+                    for f in ("no_accidents", "one_owner"):
+                        existing[f] = max(int(existing.get(f) or 0), int(item.get(f) or 0))
 
-            # OR-merge boolean signals
-            for flag in ("cold_weather_group", "has_blind_spot_mon", "no_accidents", "one_owner"):
+            # OR-merge feature flags (union of equipment across sources is correct)
+            for flag in ("cold_weather_group", "has_blind_spot_mon"):
                 existing[flag] = max(int(existing.get(flag) or 0), int(item.get(flag) or 0))
 
             # pricing_type: no-haggle wins
@@ -277,6 +283,14 @@ def upsert_listings(merged: list[dict[str, Any]]) -> dict[str, int]:
     return stats
 
 
+def get_alerted_vins() -> set[str]:
+    """Return the set of VINs that have already received an instant alert."""
+    conn = _get_conn()
+    rows = conn.execute("SELECT vin FROM listings WHERE alerted = 1").fetchall()
+    conn.close()
+    return {r["vin"] for r in rows}
+
+
 def mark_alerted(vins: list[str]) -> None:
     conn = _get_conn()
     conn.executemany(
@@ -380,10 +394,10 @@ def get_market_snapshot() -> dict:
         for trim, prices in trim_prices.items()
     }
 
-    # CarGurus great/good deal count
+    # Listings with clean CARFAX signals
     great_good = sum(
         1 for l in listings
-        if l.get("cargurus_deal_label") in ("Great Deal", "Good Deal")
+        if l.get("no_accidents") and l.get("one_owner")
     )
 
     # Lowest Sahara or High Altitude

@@ -85,7 +85,7 @@ def _normalize(raw: dict, model_label: str) -> dict:
         "dealer_name": dealer.get("name", "") if isinstance(dealer, dict) else "",
         "listing_url": listing.get("vdp_url") or listing.get("listing_url", ""),
         "exterior_color": build.get("exterior_color") or listing.get("exterior_color", ""),
-        "days_on_market": listing.get("dom"),
+        "days_on_market": listing.get("dom_active") or listing.get("dom"),
         "pricing_type": "negotiable",
         "source_type": "dealer",
         "dealer_rating": dealer_rating,

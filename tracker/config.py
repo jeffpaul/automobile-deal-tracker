@@ -28,9 +28,7 @@ MODELS = ["Wrangler 4xe", "Grand Cherokee 4xe"]
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "listings.db")
 
 # Alert thresholds
-# Digest threshold is lower than ideal because CarGurus labels and CARFAX history
-# signals are not yet fully active — raising this once those sources are stable.
-SCORE_INSTANT_ALERT = 80
+SCORE_INSTANT_ALERT = 65
 SCORE_DAILY_DIGEST = 45
 
 # Carvana delivery fee estimate (added to listing price before scoring)

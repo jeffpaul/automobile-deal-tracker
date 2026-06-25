@@ -5,12 +5,13 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
-from tracker.alerts import send_daily_digest, send_instant_alerts
+from tracker.alerts import send_daily_digest, send_instant_alerts, send_low_inventory_warning
 from tracker.config import SCORE_DAILY_DIGEST, SCORE_INSTANT_ALERT
 from tracker.scorer import compute_market_averages, score_listing
 from tracker.sources.carfax import fetch_carfax
 from tracker.sources.marketcheck import fetch_marketcheck
 from tracker.store import (
+    get_alerted_vins,
     get_market_snapshot,
     get_stored_market_averages,
     init_db,
@@ -62,6 +63,16 @@ def main() -> None:
     merged = merge_listings(all_listings)
     logger.info("After deduplication: %d unique VINs", len(merged))
 
+    # Sanity check: MarketCheck should return ≥10 listings under normal conditions.
+    # Fewer usually means quota exhaustion or an API outage — warn and bail out.
+    mc_count = sum(1 for l in all_listings if l.get("source") == "marketcheck")
+    if mc_count < 10:
+        logger.warning("Low MarketCheck count (%d) — sending warning email", mc_count)
+        send_low_inventory_warning(mc_count, errors)
+        log_run({"total": len(merged), "new": 0, "price_drops": 0, "alerts_sent": 0},
+                source_status, errors)
+        return
+
     # First scoring pass — price/trim/mileage/DOM signals only (no history yet)
     market_avgs = compute_market_averages(merged)
     if not market_avgs:
@@ -77,11 +88,13 @@ def main() -> None:
         listing["composite_score"] = score_listing(listing, market_avgs.get(avg_key))
 
     stats = upsert_listings(merged)
+    already_alerted = get_alerted_vins()
 
     # Alert logic
     great_deals = [
         l for l in merged
-        if (l.get("composite_score") or 0) >= SCORE_INSTANT_ALERT and not l.get("alerted")
+        if (l.get("composite_score") or 0) >= SCORE_INSTANT_ALERT
+        and l["vin"] not in already_alerted
     ]
     good_deals = [
         l for l in merged

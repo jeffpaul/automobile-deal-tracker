@@ -73,6 +73,32 @@ def _send_email(subject: str, html_body: str) -> bool:
         return False
 
 
+def send_low_inventory_warning(mc_count: int, source_errors: list[str]) -> bool:
+    """Send a warning email when MarketCheck returns suspiciously few listings."""
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    error_html = ""
+    if source_errors:
+        items = "".join(f"<li>{e}</li>" for e in source_errors)
+        error_html = f"<p><strong>Source errors recorded:</strong><br><ul>{items}</ul></p>"
+
+    body = f"""
+<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+<h2 style="color:#cc0000">⚠️ Jeep 4xe Tracker — Low Inventory Warning</h2>
+<p>The tracker run at <strong>{ts}</strong> returned only <strong>{mc_count} MarketCheck listings</strong>,
+which is below the expected minimum of 10.</p>
+<p>This likely indicates one of:<br>
+<ul>
+  <li>MarketCheck API quota exhaustion</li>
+  <li>API outage or rate limiting</li>
+  <li>Search parameter issue</li>
+</ul></p>
+{error_html}
+<p style="color:#666;font-size:12px">No deal digest was sent for this run. Check GitHub Actions logs for details.</p>
+</body></html>
+"""
+    return _send_email("⚠️ Jeep 4xe Tracker: Low inventory warning", body)
+
+
 def _format_price(price: int | None) -> str:
     if price is None:
         return "N/A"
@@ -125,9 +151,6 @@ def _listing_card_html(lst: dict[str, Any], market_avg: float | None) -> str:
         carfax_parts.append("✅ No accidents")
     if lst.get("one_owner"):
         carfax_parts.append("✅ 1 owner")
-    svc = lst.get("service_record_count") or 0
-    if svc:
-        carfax_parts.append(f"📋 {svc} service record{'s' if svc != 1 else ''}")
     carfax_html = "  ".join(carfax_parts) if carfax_parts else "No data"
 
     winter_kit = ""
@@ -282,7 +305,7 @@ def send_daily_digest(
 <div style="background:#f0f4ff;border:1px solid #c0d0f0;border-radius:6px;padding:16px;margin-bottom:24px">
   <h3 style="margin-top:0">📊 Market Snapshot</h3>
   <p>Total active 4xe listings ({SEARCH_RADIUS_MILES} mi): <strong>{snapshot.get("total", 0)}</strong></p>
-  <p>CarGurus Great/Good Deal ratings today: <strong>{snapshot.get("great_good_deal_count", 0)}</strong></p>
+  <p>Clean CARFAX (no accidents + 1 owner): <strong>{snapshot.get("great_good_deal_count", 0)}</strong></p>
   {f"<p>Lowest Sahara / High Altitude today: <strong>{_format_price(snapshot.get('lowest_sahara_high_altitude'))}</strong></p>" if snapshot.get("lowest_sahara_high_altitude") else ""}
   <table style="font-size:13px;border-collapse:collapse">
     <tr><th style="padding:3px 8px;text-align:left">Trim</th><th style="padding:3px 8px;text-align:left">Avg price</th></tr>

@@ -85,15 +85,10 @@ def score_listing(listing: dict[str, Any], market_avg_for_trim: float | None) ->
         score += 8
     if listing.get("one_owner"):
         score += 4
-    svc = listing.get("service_record_count") or 0
-    if svc >= 3:
-        score += 3
-    elif svc >= 1:
-        score += 1
     badge = listing.get("carfax_badge") or ""
-    if badge == "Great Value":
+    if badge in ("Great Value", "GREAT"):
         score += 3
-    elif badge == "Good Value":
+    elif badge in ("Good Value", "GOOD"):
         score += 1
 
     # 4. Trim value weight — winter/safety calibrated (max 12 pts)
@@ -233,18 +228,11 @@ def score_breakdown(listing: dict[str, Any], market_avg_for_trim: float | None) 
     if listing.get("one_owner"):
         cf_pts += 4
         cf_parts.append("1 owner")
-    svc = listing.get("service_record_count") or 0
-    if svc >= 3:
-        cf_pts += 3
-        cf_parts.append(f"{svc} svc records")
-    elif svc >= 1:
-        cf_pts += 1
-        cf_parts.append(f"{svc} svc record")
     badge = listing.get("carfax_badge") or ""
-    if badge == "Great Value":
+    if badge in ("Great Value", "GREAT"):
         cf_pts += 3
         cf_parts.append("Great Value badge")
-    elif badge == "Good Value":
+    elif badge in ("Good Value", "GOOD"):
         cf_pts += 1
         cf_parts.append("Good Value badge")
     if cf_pts != 0:
