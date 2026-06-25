@@ -15,7 +15,7 @@ from tracker.config import (
 
 logger = logging.getLogger(__name__)
 
-CARAPIS_BASE = "https://api.carapis.com/v1/parsers/{source}/search"
+CARAPIS_BASE = "https://api.carapis.com/v1/{source}/search"
 
 # Per-source request payloads
 _SOURCE_PAYLOADS: dict[str, dict] = {

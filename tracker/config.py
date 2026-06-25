@@ -19,7 +19,7 @@ SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 # Search parameters
 SEARCH_ZIP = "60803"           # Alsip, IL
 SEARCH_LOCATION = "Alsip, IL"
-SEARCH_RADIUS_MILES = 150
+SEARCH_RADIUS_MILES = 100  # MarketCheck free/starter plan caps at 100 mi; upgrade for 150
 YEAR_MIN = 2023
 YEAR_MAX = 2025
 MODELS = ["Wrangler 4xe", "Grand Cherokee 4xe"]
