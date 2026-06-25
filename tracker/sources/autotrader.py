@@ -145,17 +145,27 @@ def fetch_autotrader() -> list[dict[str, Any]]:
         logger.warning("APIFY_API_TOKEN not set — skipping AutoTrader")
         return []
 
+    # AutoTrader uses base model names; 4xe is a trim, not part of the model name
+    model_map = {
+        "Wrangler 4xe": "Wrangler",
+        "Grand Cherokee 4xe": "Grand Cherokee",
+    }
     results = []
-    for model_query in ["Wrangler 4xe", "Grand Cherokee 4xe"]:
+    for model_label, model_query in model_map.items():
         try:
             items = _run_actor(model_query)
         except Exception as e:
-            logger.error("AutoTrader Apify actor failed for %s: %s", model_query, e)
+            logger.error("AutoTrader Apify actor failed for %s: %s", model_label, e)
             continue
 
         for item in items:
+            # Filter to 4xe trims only
+            trim = (item.get("trim") or item.get("trimName") or "").lower()
+            if "4xe" not in trim and "4 xe" not in trim:
+                continue
             norm = _normalize(item)
             if norm and norm["vin"]:
+                norm["model"] = model_label  # override with 4xe label
                 results.append(norm)
 
     logger.info("AutoTrader: fetched %d listings", len(results))
