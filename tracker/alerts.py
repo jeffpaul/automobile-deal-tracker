@@ -16,6 +16,7 @@ from tracker.config import (
     SMTP_USER,
     SMTP_PASSWORD,
 )
+from tracker.config import SEARCH_ZIP, SEARCH_RADIUS_MILES
 from tracker.scorer import is_winter_penalized_trim, score_breakdown
 
 logger = logging.getLogger(__name__)
@@ -235,7 +236,7 @@ def send_instant_alerts(listings: list[dict[str, Any]], market_avgs: dict) -> in
   {_listing_card_html(lst, market_avg)}
   <hr style="margin:24px 0">
   <p style="font-size:13px;color:#555;background:#fffbe6;padding:12px;border-radius:4px">{REGEN_NOTE}</p>
-  <p style="font-size:11px;color:#999;margin-top:24px">Jeep 4xe Tracker · Alsip, IL 60803 · 150 mi radius · Score: {score:.0f}/100</p>
+  <p style="font-size:11px;color:#999;margin-top:24px">Jeep 4xe Tracker · ZIP {SEARCH_ZIP} · {SEARCH_RADIUS_MILES} mi radius · Score: {score:.0f}/100</p>
 </body></html>"""
 
         if _send_email(subject, body):
@@ -278,7 +279,7 @@ def send_daily_digest(
     snapshot_html = f"""
 <div style="background:#f0f4ff;border:1px solid #c0d0f0;border-radius:6px;padding:16px;margin-bottom:24px">
   <h3 style="margin-top:0">📊 Market Snapshot</h3>
-  <p>Total active 4xe listings (150 mi): <strong>{snapshot.get("total", 0)}</strong></p>
+  <p>Total active 4xe listings ({SEARCH_RADIUS_MILES} mi): <strong>{snapshot.get("total", 0)}</strong></p>
   <p>CarGurus Great/Good Deal ratings today: <strong>{snapshot.get("great_good_deal_count", 0)}</strong></p>
   {f"<p>Lowest Sahara / High Altitude today: <strong>{_format_price(snapshot.get('lowest_sahara_high_altitude'))}</strong></p>" if snapshot.get("lowest_sahara_high_altitude") else ""}
   <table style="font-size:13px;border-collapse:collapse">
@@ -303,7 +304,7 @@ def send_daily_digest(
     body = f"""
 <html><body style="font-family:sans-serif;max-width:640px;margin:0 auto;padding:20px">
   <h1 style="font-size:22px">🛻 Jeep 4xe Deal Digest</h1>
-  <p style="color:#666">{today} · Alsip, IL · 150 mi radius · {stats.get("new", 0)} new listings · {stats.get("price_drops", 0)} price drops</p>
+  <p style="color:#666">{today} · ZIP {SEARCH_ZIP} · {SEARCH_RADIUS_MILES} mi radius · {stats.get("new", 0)} new listings · {stats.get("price_drops", 0)} price drops</p>
   {snapshot_html}
   <h2>Deals worth seeing ({n})</h2>
   {cards_html}
