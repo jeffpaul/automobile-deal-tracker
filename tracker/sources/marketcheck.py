@@ -10,7 +10,7 @@ from tracker.config import MARKETCHECK_API_KEY, SEARCH_ZIP, SEARCH_RADIUS_MILES,
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://marketcheck-prod.apigee.net/v2/search/car/active"
+BASE_URL = "https://mc-api.marketcheck.com/v2/search/car/active"
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
