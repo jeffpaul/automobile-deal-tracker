@@ -14,6 +14,7 @@ from tracker.sources.enterprise import fetch_enterprise
 from tracker.sources.marketcheck import fetch_marketcheck
 from tracker.store import (
     get_market_snapshot,
+    get_stored_market_averages,
     init_db,
     log_run,
     mark_alerted,
@@ -66,7 +67,17 @@ def main() -> None:
     merged = merge_listings(all_listings)
     logger.info("After deduplication: %d unique VINs", len(merged))
 
+    # Compute averages from this run's data, falling back to stored DB averages
+    # so scoring works even when a source returns nothing new.
     market_avgs = compute_market_averages(merged)
+    if not market_avgs:
+        market_avgs = get_stored_market_averages()
+    else:
+        # Merge with stored averages for any (model, trim) combos not in this run
+        stored = get_stored_market_averages()
+        for k, v in stored.items():
+            if k not in market_avgs:
+                market_avgs[k] = v
 
     for listing in merged:
         avg_key = (listing.get("model", ""), listing.get("trim", ""))

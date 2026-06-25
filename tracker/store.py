@@ -343,6 +343,20 @@ def log_run(stats: dict, source_status: dict, errors: list[str] | None = None) -
     conn.close()
 
 
+def get_stored_market_averages() -> dict[tuple, float]:
+    """Pull market averages from all listings currently in the DB."""
+    from collections import defaultdict
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT model, trim, price FROM listings WHERE price IS NOT NULL AND price > 5000"
+    ).fetchall()
+    conn.close()
+    buckets: dict[tuple, list[int]] = defaultdict(list)
+    for r in rows:
+        buckets[(r["model"], r["trim"])].append(r["price"])
+    return {k: sum(v) / len(v) for k, v in buckets.items() if v}
+
+
 def get_market_snapshot() -> dict:
     """Return stats for the email market snapshot section."""
     conn = _get_conn()

@@ -106,9 +106,8 @@ def fetch_carfax() -> list[dict[str, Any]]:
         payload = {
             "make": "Jeep",
             "model": model_query,
-            "yearMin": YEAR_MIN,
-            "location": "Chicago, IL",
-            "radius": 150,
+            "location": "Downers Grove, IL",
+            "radius": 100,
             "maxItems": 100,
         }
         try:

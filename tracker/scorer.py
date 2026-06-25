@@ -19,18 +19,17 @@ COLD_WEATHER_GROUP_BONUS = 3  # pts: heated seats + wheel + remote start
 
 
 def _trim_weight(trim: str) -> float:
-    """Return the weight for a trim name, fuzzy-matching on partial strings."""
-    trim_clean = (trim or "").strip().title()
-    if trim_clean in TRIM_VALUE_WEIGHTS:
-        return TRIM_VALUE_WEIGHTS[trim_clean]
-    # Partial matches
-    lower = trim_clean.lower()
+    """Return the weight for a trim name, fuzzy-matching on partial strings.
+    MarketCheck returns names like 'Sahara 4XE', 'High Altitude 4XE', etc.
+    """
+    lower = (trim or "").lower()
+    # Check most specific first to avoid 'rubicon x' matching 'rubicon'
     if "high altitude" in lower:
         return TRIM_VALUE_WEIGHTS["High Altitude"]
-    if "sahara" in lower:
-        return TRIM_VALUE_WEIGHTS["Sahara"]
     if "rubicon x" in lower:
         return TRIM_VALUE_WEIGHTS["Rubicon X"]
+    if "sahara" in lower:
+        return TRIM_VALUE_WEIGHTS["Sahara"]
     if "willys '41" in lower or "willys41" in lower:
         return TRIM_VALUE_WEIGHTS["Willys '41"]
     if "willys" in lower:
