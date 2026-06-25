@@ -16,7 +16,7 @@ from tracker.config import (
     SMTP_USER,
     SMTP_PASSWORD,
 )
-from tracker.scorer import is_winter_penalized_trim
+from tracker.scorer import is_winter_penalized_trim, score_breakdown
 
 logger = logging.getLogger(__name__)
 
@@ -161,11 +161,33 @@ def _listing_card_html(lst: dict[str, Any], market_avg: float | None) -> str:
     if is_winter_penalized_trim(trim):
         winter_penalty = "<tr><td style='padding:4px 0;color:#c00'><strong>⚠️ Mud-terrain tires</strong> — less suitable for winter pavement driving</td></tr>"
 
+    # Score breakdown pills
+    breakdown = score_breakdown(lst, market_avg)
+    breakdown_pills = ""
+    for label, pts in breakdown:
+        if pts > 0:
+            color = "#1a7a1a" if pts >= 8 else "#2a7a2a"
+            bg = "#e6f4e6" if pts >= 8 else "#f0f8f0"
+            pts_str = f"+{pts:.0f}"
+        elif pts < 0:
+            color = "#990000"
+            bg = "#fdf0f0"
+            pts_str = f"{pts:.0f}"
+        else:
+            continue
+        breakdown_pills += (
+            f'<span style="display:inline-block;background:{bg};color:{color};'
+            f'border:1px solid {color}33;border-radius:12px;padding:2px 8px;'
+            f'margin:2px 3px 2px 0;font-size:11px;white-space:nowrap">'
+            f'{label} <strong>{pts_str}</strong></span>'
+        )
+
     return f"""
 <div style="background:#f9f9f9;border:1px solid #ddd;border-radius:6px;padding:16px;margin:16px 0;font-family:sans-serif">
   <div style="font-size:16px;font-weight:bold;margin-bottom:8px">
     [{score:.0f}/100] {_score_label(score)}
   </div>
+  {f'<div style="margin-bottom:10px;line-height:1.8">{breakdown_pills}</div>' if breakdown_pills else ""}
   <div style="font-size:18px;font-weight:bold;margin-bottom:12px">{year} Jeep {model} {trim}</div>
   <table style="font-size:14px;border-collapse:collapse;width:100%">
     <tr><td style="padding:4px 0;color:#666;width:130px">Price</td><td style="padding:4px 0"><strong>{_format_price(price)}</strong>{pct_str}</td></tr>

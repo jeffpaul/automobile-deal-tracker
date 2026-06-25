@@ -160,6 +160,134 @@ def is_winter_penalized_trim(trim: str) -> bool:
     return "willys" in lower or ("rubicon" in lower and "rubicon x" not in lower)
 
 
+def score_breakdown(listing: dict[str, Any], market_avg_for_trim: float | None) -> list[tuple[str, float]]:
+    """Return each scoring component as (label, pts) — non-zero entries only."""
+    import json
+    components: list[tuple[str, float]] = []
+
+    price = listing.get("price") or 0
+
+    # 1. Price vs market (max 35 pts)
+    if market_avg_for_trim and price > 0:
+        pct_below = (market_avg_for_trim - price) / market_avg_for_trim * 100
+        if pct_below >= 12:
+            pts = 35
+        elif pct_below >= 10:
+            pts = 28
+        elif pct_below >= 7:
+            pts = 20
+        elif pct_below >= 5:
+            pts = 12
+        elif pct_below >= 2:
+            pts = 5
+        elif pct_below < 0:
+            pts = -10
+        else:
+            pts = 0
+        if pts != 0:
+            pct_label = f"{pct_below:+.1f}%" if pct_below != 0 else "at market"
+            components.append((f"Price ({pct_label} vs mkt)", pts))
+    else:
+        components.append(("Price (no market data)", 0))
+
+    # 2. CarGurus deal rating (max 15 pts)
+    label = listing.get("cargurus_deal_label") or ""
+    cg_pts = {"Great Deal": 15, "Good Deal": 9, "Fair Deal": 3, "High Price": -5}.get(label, 0)
+    if cg_pts != 0:
+        components.append((f"CarGurus ({label})", cg_pts))
+
+    # 3. CARFAX signals (max 15 pts)
+    cf_pts = 0.0
+    cf_parts = []
+    if listing.get("no_accidents"):
+        cf_pts += 8
+        cf_parts.append("no accidents")
+    if listing.get("one_owner"):
+        cf_pts += 4
+        cf_parts.append("1 owner")
+    svc = listing.get("service_record_count") or 0
+    if svc >= 3:
+        cf_pts += 3
+        cf_parts.append(f"{svc} svc records")
+    elif svc >= 1:
+        cf_pts += 1
+        cf_parts.append(f"{svc} svc record")
+    badge = listing.get("carfax_badge") or ""
+    if badge == "Great Value":
+        cf_pts += 3
+        cf_parts.append("Great Value badge")
+    elif badge == "Good Value":
+        cf_pts += 1
+        cf_parts.append("Good Value badge")
+    if cf_pts != 0:
+        components.append((f"CARFAX ({', '.join(cf_parts)})", cf_pts))
+
+    # 4. Trim weight (max 12 pts)
+    w = _trim_weight(listing.get("trim", ""))
+    trim_pts = round((w - 0.75) * 30, 1)
+    if trim_pts != 0:
+        components.append((f"Trim ({listing.get('trim', '?')})", trim_pts))
+
+    # 5. Mileage (max 12 pts)
+    miles = listing.get("mileage") or 99999
+    if miles < 10000:
+        components.append((f"Mileage ({miles:,} mi)", 12))
+    elif miles < 20000:
+        components.append((f"Mileage ({miles:,} mi)", 8))
+    elif miles < 30000:
+        components.append((f"Mileage ({miles:,} mi)", 4))
+    elif miles > 40000:
+        components.append((f"Mileage ({miles:,} mi)", -4))
+
+    # 6. Days on market (max 8 pts)
+    dom = listing.get("days_on_market")
+    if dom is not None:
+        if dom <= 3:
+            components.append((f"DOM ({dom}d — fresh)", 8))
+        elif dom <= 7:
+            components.append((f"DOM ({dom}d)", 5))
+        elif dom <= 14:
+            components.append((f"DOM ({dom}d)", 2))
+        elif dom > 60:
+            components.append((f"DOM ({dom}d — stale)", -4))
+
+    # 7. Price drop bonus (max 8 pts)
+    history = listing.get("price_history") or []
+    if isinstance(history, str):
+        try:
+            history = json.loads(history)
+        except Exception:
+            history = []
+    if len(history) >= 2 and price > 0:
+        original_price = history[0]["price"]
+        if original_price and original_price > price:
+            drop_pct = (original_price - price) / original_price * 100
+            drop_amt = original_price - price
+            if drop_pct >= 5:
+                components.append((f"Price drop (↓${drop_amt:,})", 8))
+            elif drop_pct >= 2:
+                components.append((f"Price drop (↓${drop_amt:,})", 4))
+
+    # 8. Source type
+    if listing.get("pricing_type") == "no-haggle":
+        components.append(("No-haggle pricing", -5))
+    if listing.get("source_type") == "rental-fleet":
+        components.append(("Rental fleet (maintained)", 3))
+
+    # 9. Cold Weather Group
+    if listing.get("cold_weather_group"):
+        components.append(("Cold Weather Group", COLD_WEATHER_GROUP_BONUS))
+
+    # 10. Dealer rating
+    rating = listing.get("dealer_rating") or 0
+    if rating >= 4.5:
+        components.append((f"Dealer ★{rating:.1f}", 2))
+    elif 0 < rating < 3.5:
+        components.append((f"Dealer ★{rating:.1f}", -3))
+
+    return components
+
+
 def compute_market_averages(listings: list[dict]) -> dict[tuple, float]:
     """Compute mean price by (model, trim) for use in price scoring."""
     from collections import defaultdict
