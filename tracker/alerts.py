@@ -109,14 +109,16 @@ def _listing_card_html(lst: dict[str, Any], market_avg: float | None) -> str:
     dom = lst.get("days_on_market")
     dom_str = f"{dom} day{'s' if dom != 1 else ''} ago" if dom is not None else "Unknown"
 
-    cargurus_label = lst.get("cargurus_deal_label") or ""
-    cargurus_expl = lst.get("cargurus_explanation") or ""
-    cargurus_html = ""
-    if cargurus_label:
-        icon = "✅" if cargurus_label in ("Great Deal", "Good Deal") else "⚠️"
-        cargurus_html = f"{icon} {cargurus_label}"
-        if cargurus_expl:
-            cargurus_html += f" — {cargurus_expl}"
+    ref_price = lst.get("ref_price") or 0
+    ref_html = ""
+    if ref_price and lst.get("price"):
+        pct = (ref_price - lst["price"]) / ref_price * 100
+        if pct >= 1:
+            ref_html = f"✅ {pct:.1f}% below MC reference ({_format_price(int(ref_price))})"
+        elif pct <= -5:
+            ref_html = f"⚠️ {abs(pct):.1f}% above MC reference ({_format_price(int(ref_price))})"
+        else:
+            ref_html = f"At market reference ({_format_price(int(ref_price))})"
 
     carfax_parts = []
     if lst.get("no_accidents"):
@@ -196,7 +198,7 @@ def _listing_card_html(lst: dict[str, Any], market_avg: float | None) -> str:
     <tr><td style="padding:4px 0;color:#666">Location</td><td style="padding:4px 0">{location}</td></tr>
     <tr><td style="padding:4px 0;color:#666">Dealer</td><td style="padding:4px 0">{dealer_str}</td></tr>
     <tr><td style="padding:4px 0;color:#666">Listed</td><td style="padding:4px 0">{dom_str}</td></tr>
-    {f'<tr><td style="padding:4px 0;color:#666">CarGurus</td><td style="padding:4px 0">{cargurus_html}</td></tr>' if cargurus_html else ""}
+    {f'<tr><td style="padding:4px 0;color:#666">MC rating</td><td style="padding:4px 0">{ref_html}</td></tr>' if ref_html else ""}
     <tr><td style="padding:4px 0;color:#666">CARFAX</td><td style="padding:4px 0">{carfax_html}</td></tr>
     {f'<tr><td style="padding:4px 0;color:#666">Winter kit</td><td style="padding:4px 0">{winter_kit}</td></tr>' if winter_kit else ""}
     {f'<tr><td style="padding:4px 0;color:#666">Safety tech</td><td style="padding:4px 0">{safety_html}</td></tr>' if safety_html else ""}

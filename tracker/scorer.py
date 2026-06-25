@@ -63,16 +63,22 @@ def score_listing(listing: dict[str, Any], market_avg_for_trim: float | None) ->
         elif pct_below < 0:
             score -= 10  # Overpriced vs. market
 
-    # 2. CarGurus deal rating (max 15 pts)
-    label = listing.get("cargurus_deal_label") or ""
-    if label == "Great Deal":
-        score += 15
-    elif label == "Good Deal":
-        score += 9
-    elif label == "Fair Deal":
-        score += 3
-    elif label == "High Price":
-        score -= 5
+    # 2. Price vs. MarketCheck reference price (max 15 pts)
+    # ref_price is MC's market-derived value for this specific used vehicle.
+    # Distinct from market_avg_for_trim (population average) — ref_price is per-car.
+    ref_price = listing.get("ref_price") or 0
+    if ref_price > 0 and price > 0:
+        pct_below_ref = (ref_price - price) / ref_price * 100
+        if pct_below_ref >= 8:
+            score += 15
+        elif pct_below_ref >= 5:
+            score += 11
+        elif pct_below_ref >= 3:
+            score += 7
+        elif pct_below_ref >= 1:
+            score += 3
+        elif pct_below_ref < -5:
+            score -= 5  # Significantly above MC reference — overpriced
 
     # 3. CARFAX history signals (max 15 pts)
     if listing.get("no_accidents"):
@@ -190,11 +196,24 @@ def score_breakdown(listing: dict[str, Any], market_avg_for_trim: float | None) 
     else:
         components.append(("Price (no market data)", 0))
 
-    # 2. CarGurus deal rating (max 15 pts)
-    label = listing.get("cargurus_deal_label") or ""
-    cg_pts = {"Great Deal": 15, "Good Deal": 9, "Fair Deal": 3, "High Price": -5}.get(label, 0)
-    if cg_pts != 0:
-        components.append((f"CarGurus ({label})", cg_pts))
+    # 2. Price vs. MC reference price (max 15 pts)
+    ref_price = listing.get("ref_price") or 0
+    if ref_price > 0 and price > 0:
+        pct_below_ref = (ref_price - price) / ref_price * 100
+        if pct_below_ref >= 8:
+            ref_pts = 15
+        elif pct_below_ref >= 5:
+            ref_pts = 11
+        elif pct_below_ref >= 3:
+            ref_pts = 7
+        elif pct_below_ref >= 1:
+            ref_pts = 3
+        elif pct_below_ref < -5:
+            ref_pts = -5
+        else:
+            ref_pts = 0
+        if ref_pts != 0:
+            components.append((f"vs. MC ref ({pct_below_ref:+.1f}%)", ref_pts))
 
     # 3. CARFAX signals (max 15 pts)
     cf_pts = 0.0
