@@ -23,7 +23,8 @@ BASE_URL = "https://api.carapis.com/apix/catalog_api/vehicles/"
 
 
 def _headers() -> dict:
-    return {"X-Api-Key": CARAPIS_API_KEY}
+    # Carapis accepts both Bearer and X-Api-Key; Bearer is the documented form
+    return {"Authorization": f"Bearer {CARAPIS_API_KEY}"}
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
@@ -43,102 +44,90 @@ def _extract_features_text(item: dict) -> str:
 
 
 def _normalize(item: dict) -> dict | None:
-    vin = item.get("vin") or item.get("external_id") or item.get("id") or ""
-    if not vin:
+    # Carapis uses UUID `id`, no VIN field in catalog view
+    item_id = item.get("id") or ""
+    if not item_id:
         return None
 
-    # Price: Carapis stores as float in USD
-    price_raw = item.get("price") or item.get("price_usd") or 0
+    # Price is price_usd (float)
+    price_raw = item.get("price_usd") or 0
     try:
         price = int(float(price_raw))
     except (TypeError, ValueError):
         price = None
 
-    mileage_raw = item.get("mileage") or item.get("odometer") or 0
+    mileage_raw = item.get("mileage") or 0
     try:
         mileage = int(float(str(mileage_raw).replace(",", "")))
     except (TypeError, ValueError):
         mileage = None
 
-    # Source info
-    source_obj = item.get("source") or {}
-    source_name = (source_obj.get("name") or source_obj if isinstance(source_obj, str) else "carapis").lower()
-
-    # Normalise source name to our internal labels
-    if "carvana" in source_name:
+    # Source identifier is source_code
+    source_code = (item.get("source_code") or "").lower()
+    if "carvana" in source_code:
         source_label = "carvana"
         pricing_type = "no-haggle"
         source_type = "online-only"
         if price:
             price += CARVANA_DELIVERY_FEE
-    elif "autotrader" in source_name:
+    elif "autotrader" in source_code:
         source_label = "autotrader"
         pricing_type = "negotiable"
         source_type = "dealer"
-    elif "cars.com" in source_name or "cars_com" in source_name:
+    elif "cars" in source_code:
         source_label = "cars_com"
         pricing_type = "negotiable"
         source_type = "dealer"
-    elif "carmax" in source_name:
-        source_label = "carmax"
-        pricing_type = "no-haggle"
-        source_type = "dealer"
     else:
-        source_label = "carapis"
+        source_label = f"carapis_{source_code}"
         pricing_type = "negotiable"
         source_type = "dealer"
 
     model_raw = (item.get("model_name") or item.get("model_slug") or "").lower()
     model = "Grand Cherokee 4xe" if "grand cherokee" in model_raw or "grand_cherokee" in model_raw else "Wrangler 4xe"
 
-    # Location
-    location = item.get("location") or {}
-    city = location.get("city") or item.get("city") or ""
-    state = location.get("state") or location.get("region") or item.get("state") or ""
+    # Location: `region` is city/region string, `source_location` is structured (often null)
+    loc = item.get("source_location") or {}
+    city = loc.get("city") or item.get("region") or ""
+    state = loc.get("state") or loc.get("region") or ""
 
-    # Seller/dealer
-    seller = item.get("seller") or item.get("dealer") or {}
-    dealer_name = seller.get("name") or item.get("dealer_name") or ""
-    dealer_rating_raw = seller.get("rating") or item.get("dealer_rating")
-    try:
-        dealer_rating = float(dealer_rating_raw) if dealer_rating_raw else None
-    except (TypeError, ValueError):
-        dealer_rating = None
+    # No dealer object in catalog view
+    dealer_name = ""
+    dealer_rating = None
 
-    # Features / Cold Weather Group detection
-    combined = _extract_features_text(item)
-    desc = (item.get("description") or "").lower()
-    combined += " " + desc
-    heated_seats = "heated seat" in combined or "heated front seat" in combined
-    heated_wheel = "heated steering" in combined
-    remote_start = "remote start" in combined
+    # Features / Cold Weather Group detection from analysis text if present
+    analysis = item.get("analysis") or {}
+    desc = str(analysis).lower() + " " + (item.get("description") or "").lower()
+    heated_seats = "heated seat" in desc or "heated front seat" in desc
+    heated_wheel = "heated steering" in desc
+    remote_start = "remote start" in desc
     cold_weather_group = int(sum([heated_seats, heated_wheel, remote_start]) >= 2)
-    blind_spot = int("blind spot" in combined or "blind-spot" in combined)
+    blind_spot = int("blind spot" in desc or "blind-spot" in desc)
 
-    listing_url = item.get("url") or item.get("listing_url") or item.get("original_url") or ""
+    # Use the Carapis UUID as the VIN key (prefixed) so dedup works
+    # Real VIN only available on the detail endpoint /vehicles/{id}/
+    vin = f"CRPS-{item_id}"
 
     return {
-        "vin": str(vin),
+        "vin": vin,
         "source": source_label,
         "year": item.get("year"),
         "model": model,
-        "trim": item.get("trim") or item.get("trim_name") or "",
+        "trim": item.get("trim") or "",
         "price": price if price and price > 1000 else None,
         "mileage": mileage,
         "city": city,
         "state": state,
         "dealer_name": dealer_name,
-        "listing_url": listing_url,
-        "exterior_color": item.get("color") or item.get("exterior_color") or "",
-        "days_on_market": item.get("days_on_market") or item.get("dom"),
+        "listing_url": "",  # Not in catalog response; available on detail endpoint
+        "exterior_color": item.get("color") or "",
+        "days_on_market": None,  # Not in catalog response
         "pricing_type": pricing_type,
         "source_type": source_type,
         "dealer_rating": dealer_rating,
         "cold_weather_group": cold_weather_group,
         "has_blind_spot_mon": blind_spot,
-        # Undervalued flag from Carapis valuation engine
-        "cargurus_deal_label": "Great Deal" if item.get("is_undervalued") else None,
-        "has_accident": item.get("has_accident"),
+        "no_accidents": int(not bool(item.get("has_accident"))) if item.get("has_accident") is not None else None,
     }
 
 
@@ -161,6 +150,7 @@ def fetch_carapis() -> list[dict[str, Any]]:
                 "min_year": YEAR_MIN,
                 "max_year": YEAR_MAX,
                 "available_only": "true",
+                "source": "autotrader_us",  # US live source; add more as on_demand sources activate
                 "page_size": 100,
                 "page": page,
             }
