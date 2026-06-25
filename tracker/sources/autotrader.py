@@ -35,6 +35,9 @@ def _run_actor(model_query: str) -> list[dict]:
         "make": "Jeep",
         "model": model_query,
         "zip": SEARCH_ZIP,
+        "searchRadius": SEARCH_RADIUS_MILES,
+        "startYear": YEAR_MIN,
+        "endYear": YEAR_MAX,
         "maxItems": 100,
     }
     resp = requests.post(APIFY_RUN_URL, params=params, json=payload, timeout=240)
