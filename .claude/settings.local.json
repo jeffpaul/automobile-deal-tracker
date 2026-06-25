@@ -6,7 +6,11 @@
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
       "Bash(git pull *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(grep -v \"^$\")",
+      "Bash(pip install *)",
+      "Bash(python3 scripts/validate_keys.py)",
+      "Bash(pip3 install *)"
     ]
   }
 }
