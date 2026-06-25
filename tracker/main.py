@@ -10,7 +10,7 @@ from tracker.config import SCORE_DAILY_DIGEST, SCORE_INSTANT_ALERT
 from tracker.scorer import compute_market_averages, score_listing
 from tracker.sources.carfax import fetch_carfax
 from tracker.sources.enterprise import fetch_enterprise
-from tracker.sources.marketcheck import enrich_with_history, fetch_marketcheck
+from tracker.sources.marketcheck import fetch_marketcheck
 from tracker.store import (
     get_market_snapshot,
     get_stored_market_averages,
@@ -77,18 +77,6 @@ def main() -> None:
     for listing in merged:
         avg_key = (listing.get("model", ""), listing.get("trim", ""))
         listing["composite_score"] = score_listing(listing, market_avgs.get(avg_key))
-
-    # VIN history enrichment via MarketCheck — fetches CARFAX signals for top listings
-    history_map = enrich_with_history(merged, max_vins=25)
-    if history_map:
-        source_status["marketcheck_history"] = True
-        for listing in merged:
-            vin = listing.get("vin", "")
-            if vin in history_map:
-                listing.update(history_map[vin])
-                # Re-score with history signals now populated
-                avg_key = (listing.get("model", ""), listing.get("trim", ""))
-                listing["composite_score"] = score_listing(listing, market_avgs.get(avg_key))
 
     stats = upsert_listings(merged)
 
