@@ -24,23 +24,30 @@ _DEAL_LABEL_MAP = {
 }
 
 
+def _search_url(make: str, model: str) -> str:
+    """Build an AutoTrader used-car search URL for the given make/model."""
+    slug = model.lower().replace(" ", "-").replace("4xe", "4xe")
+    # AutoTrader URL: /cars-for-sale/used-cars/{make}/{model}/?zip=...
+    return (
+        f"https://www.autotrader.com/cars-for-sale/used-cars"
+        f"/{make.lower()}/{slug}/"
+        f"?zip={SEARCH_ZIP}&searchRadius={SEARCH_RADIUS_MILES}"
+        f"&startYear={YEAR_MIN}&endYear={YEAR_MAX}&isNewSearch=true"
+    )
+
+
 @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=2, min=5, max=30))
-def _run_actor(model_query: str) -> list[dict]:
+def _run_actor(start_url: str) -> list[dict]:
     params = {
         "token": APIFY_API_TOKEN,
-        "timeout": 120,
+        "timeout": 180,
         "memory": 1024,
     }
     payload = {
-        "make": "Jeep",
-        "model": model_query,
-        "zip": SEARCH_ZIP,
-        "radius": str(SEARCH_RADIUS_MILES),
-        "yearMin": str(YEAR_MIN),
-        "yearMax": str(YEAR_MAX),
+        "startUrls": [{"url": start_url}],
         "maxItems": 100,
     }
-    resp = requests.post(APIFY_RUN_URL, params=params, json=payload, timeout=180)
+    resp = requests.post(APIFY_RUN_URL, params=params, json=payload, timeout=240)
     if not resp.ok:
         logger.error("AutoTrader Apify HTTP %s: %s", resp.status_code, resp.text[:400])
     resp.raise_for_status()
@@ -148,8 +155,9 @@ def fetch_autotrader() -> list[dict[str, Any]]:
 
     results = []
     for model_query in ["Wrangler 4xe", "Grand Cherokee 4xe"]:
+        url = _search_url("jeep", model_query)
         try:
-            items = _run_actor(model_query)
+            items = _run_actor(url)
         except Exception as e:
             logger.error("AutoTrader Apify actor failed for %s: %s", model_query, e)
             continue
