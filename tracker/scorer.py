@@ -124,6 +124,8 @@ def score_listing(listing: dict[str, Any], market_avg_for_trim: float | None) ->
             score -= 4    # Why has it been sitting?
 
     # 7. Price drop bonus (max 8 pts)
+    # Primary: DB price history (cross-run drops). Fallback: MC's price_change_percent
+    # (dealer-reported drop, available on first sighting).
     history = listing.get("price_history") or []
     if isinstance(history, str):
         import json
@@ -135,6 +137,15 @@ def score_listing(listing: dict[str, Any], market_avg_for_trim: float | None) ->
         original_price = history[0]["price"]
         if original_price and original_price > price:
             drop_pct = (original_price - price) / original_price * 100
+            if drop_pct >= 5:
+                score += 8
+            elif drop_pct >= 2:
+                score += 4
+    elif price > 0:
+        # Use MC's price_change_percent if no DB history yet (negative = price was cut)
+        mc_change = listing.get("price_change_percent")
+        if mc_change is not None and mc_change < 0:
+            drop_pct = abs(mc_change)
             if drop_pct >= 5:
                 score += 8
             elif drop_pct >= 2:
@@ -286,6 +297,14 @@ def score_breakdown(listing: dict[str, Any], market_avg_for_trim: float | None) 
                 components.append((f"Price drop (↓${drop_amt:,})", 8))
             elif drop_pct >= 2:
                 components.append((f"Price drop (↓${drop_amt:,})", 4))
+    elif price > 0:
+        mc_change = listing.get("price_change_percent")
+        if mc_change is not None and mc_change < 0:
+            drop_pct = abs(mc_change)
+            if drop_pct >= 5:
+                components.append((f"MC price cut ({drop_pct:.1f}%)", 8))
+            elif drop_pct >= 2:
+                components.append((f"MC price cut ({drop_pct:.1f}%)", 4))
 
     # 8. Source type
     if listing.get("pricing_type") == "no-haggle":
