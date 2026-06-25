@@ -106,7 +106,7 @@ def fetch_carfax() -> list[dict[str, Any]]:
         payload = {
             "make": "Jeep",
             "model": model_query,
-            "location": "Downers Grove, IL",
+            "zipCode": "60515",
             "radius": 100,
             "maxItems": 100,
         }
