@@ -8,10 +8,9 @@ from datetime import datetime, timezone
 from tracker.alerts import send_daily_digest, send_instant_alerts
 from tracker.config import SCORE_DAILY_DIGEST, SCORE_INSTANT_ALERT
 from tracker.scorer import compute_market_averages, score_listing
-from tracker.sources.autotrader import fetch_autotrader
 from tracker.sources.carfax import fetch_carfax
 from tracker.sources.enterprise import fetch_enterprise
-from tracker.sources.marketcheck import fetch_marketcheck
+from tracker.sources.marketcheck import enrich_with_history, fetch_marketcheck
 from tracker.store import (
     get_market_snapshot,
     get_stored_market_averages,
@@ -40,9 +39,7 @@ def main() -> None:
 
     sources = {
         "marketcheck": fetch_marketcheck,
-        "autotrader": fetch_autotrader,  # deal ratings + VIN cross-reference
-        "carfax": fetch_carfax,          # accident/owner/service history signals
-        # Enterprise last — scraper, most fragile
+        "carfax": fetch_carfax,       # Apify actor — accident/owner/service history
         "enterprise": fetch_enterprise,
     }
 
@@ -63,17 +60,15 @@ def main() -> None:
 
     logger.info("Raw listings collected: %d", len(all_listings))
 
-    # Merge, dedupe, score
+    # Merge and dedupe by VIN
     merged = merge_listings(all_listings)
     logger.info("After deduplication: %d unique VINs", len(merged))
 
-    # Compute averages from this run's data, falling back to stored DB averages
-    # so scoring works even when a source returns nothing new.
+    # First scoring pass — price/trim/mileage/DOM signals only (no history yet)
     market_avgs = compute_market_averages(merged)
     if not market_avgs:
         market_avgs = get_stored_market_averages()
     else:
-        # Merge with stored averages for any (model, trim) combos not in this run
         stored = get_stored_market_averages()
         for k, v in stored.items():
             if k not in market_avgs:
@@ -82,6 +77,18 @@ def main() -> None:
     for listing in merged:
         avg_key = (listing.get("model", ""), listing.get("trim", ""))
         listing["composite_score"] = score_listing(listing, market_avgs.get(avg_key))
+
+    # VIN history enrichment via MarketCheck — fetches CARFAX signals for top listings
+    history_map = enrich_with_history(merged, max_vins=25)
+    if history_map:
+        source_status["marketcheck_history"] = True
+        for listing in merged:
+            vin = listing.get("vin", "")
+            if vin in history_map:
+                listing.update(history_map[vin])
+                # Re-score with history signals now populated
+                avg_key = (listing.get("model", ""), listing.get("trim", ""))
+                listing["composite_score"] = score_listing(listing, market_avgs.get(avg_key))
 
     stats = upsert_listings(merged)
 
