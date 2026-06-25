@@ -27,6 +27,8 @@ def _fetch_page(model: str, start: int) -> dict:
         "include_relevant_links": "true",
     }
     resp = requests.get(BASE_URL, params=params, timeout=30)
+    if not resp.ok:
+        logger.error("MarketCheck HTTP %s: %s", resp.status_code, resp.text[:400])
     resp.raise_for_status()
     return resp.json()
 

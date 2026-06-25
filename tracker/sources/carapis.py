@@ -84,6 +84,8 @@ def _post(source: str, payload: dict) -> list[dict]:
     url = CARAPIS_BASE.format(source=source)
     headers = {"Authorization": f"Bearer {CARAPIS_API_KEY}"}
     resp = requests.post(url, json=payload, headers=headers, timeout=45)
+    if not resp.ok:
+        logger.error("Carapis/%s HTTP %s: %s", source, resp.status_code, resp.text[:400])
     resp.raise_for_status()
     data = resp.json()
     # Carapis returns list or {"data": [...]} or {"listings": [...]}

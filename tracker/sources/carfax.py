@@ -23,6 +23,8 @@ def _run_actor(payload: dict) -> list[dict]:
         "memory": 1024,
     }
     resp = requests.post(APIFY_RUN_URL, params=params, json=payload, timeout=180)
+    if not resp.ok:
+        logger.error("CARFAX Apify HTTP %s: %s", resp.status_code, resp.text[:400])
     resp.raise_for_status()
     data = resp.json()
     if isinstance(data, list):
