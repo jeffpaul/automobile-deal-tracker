@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS listings (
     dealer_rating         REAL,
     cold_weather_group    INTEGER DEFAULT 0,
     has_blind_spot_mon    INTEGER DEFAULT 0,
+    ref_price             REAL,
+    price_change_percent  REAL,
     composite_score       REAL,
     first_seen            TEXT,
     last_seen             TEXT,
@@ -71,6 +73,15 @@ def _get_conn() -> sqlite3.Connection:
 def init_db() -> None:
     conn = _get_conn()
     conn.executescript(SCHEMA_SQL)
+    # Migrations for columns added after initial schema
+    for col, typedef in [
+        ("ref_price", "REAL"),
+        ("price_change_percent", "REAL"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE listings ADD COLUMN {col} {typedef}")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
     conn.commit()
     conn.close()
 
@@ -194,6 +205,7 @@ def upsert_listings(merged: list[dict[str, Any]]) -> dict[str, int]:
                     no_accidents = ?, one_owner = ?, service_record_count = ?,
                     carfax_badge = ?, dealer_rating = ?,
                     cold_weather_group = ?, has_blind_spot_mon = ?,
+                    ref_price = ?, price_change_percent = ?,
                     composite_score = ?, last_seen = ?, price_history = ?
                 WHERE vin = ?""",
                 (
@@ -222,6 +234,8 @@ def upsert_listings(merged: list[dict[str, Any]]) -> dict[str, int]:
                     lst.get("dealer_rating"),
                     lst.get("cold_weather_group", 0),
                     lst.get("has_blind_spot_mon", 0),
+                    lst.get("ref_price"),
+                    lst.get("price_change_percent"),
                     lst.get("composite_score"),
                     now,
                     json.dumps(price_history),
@@ -239,10 +253,11 @@ def upsert_listings(merged: list[dict[str, Any]]) -> dict[str, int]:
                     cargurus_deal_label, cargurus_deal_score, cargurus_explanation,
                     truecar_market_price, no_accidents, one_owner,
                     service_record_count, carfax_badge, dealer_rating,
-                    cold_weather_group, has_blind_spot_mon, composite_score,
-                    first_seen, last_seen, price_history, alerted
+                    cold_weather_group, has_blind_spot_mon,
+                    ref_price, price_change_percent,
+                    composite_score, first_seen, last_seen, price_history, alerted
                 ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0
                 )""",
                 (
                     vin,
@@ -271,6 +286,8 @@ def upsert_listings(merged: list[dict[str, Any]]) -> dict[str, int]:
                     lst.get("dealer_rating"),
                     lst.get("cold_weather_group", 0),
                     lst.get("has_blind_spot_mon", 0),
+                    lst.get("ref_price"),
+                    lst.get("price_change_percent"),
                     lst.get("composite_score"),
                     now,
                     now,

@@ -41,19 +41,11 @@ def _normalize(raw: dict, model_label: str) -> dict:
     listing = raw.get("listing", raw)
     build = raw.get("build", {})
 
-    features = listing.get("features", []) or []
-    if isinstance(features, str):
-        features = [features]
-    options_str = " ".join(features).lower()
-    desc = (listing.get("seller_comments") or "").lower()
-    combined = options_str + " " + desc
-    heated_seats = "heated seat" in combined or "heated front seat" in combined
-    heated_wheel = "heated steering" in combined
-    remote_start = "remote start" in combined
-    cold_weather_group = int(sum([heated_seats, heated_wheel, remote_start]) >= 2)
-    blind_spot = int(
-        "blind spot" in combined or "blind-spot" in combined or "bsm" in combined
-    )
+    # MC Basic plan does not return features or seller_comments — these fields
+    # are always None. cold_weather_group and has_blind_spot_mon are populated
+    # by the CARFAX source (topOptions) for matched VINs; default 0 here.
+    cold_weather_group = 0
+    blind_spot = 0
 
     dealer = listing.get("dealer") or {}
     dealer_rating_raw = dealer.get("rating") if isinstance(dealer, dict) else None
