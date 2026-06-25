@@ -17,8 +17,8 @@ SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 
 # Search parameters
-SEARCH_ZIP = "60803"           # Alsip, IL
-SEARCH_LOCATION = "Alsip, IL"
+SEARCH_ZIP = "60515"           # Downers Grove, IL
+SEARCH_LOCATION = "Downers Grove, IL"
 SEARCH_RADIUS_MILES = 100
 YEAR_MIN = 2023
 YEAR_MAX = 2025
