@@ -8,9 +8,8 @@ from datetime import datetime, timezone
 from tracker.alerts import send_daily_digest, send_instant_alerts
 from tracker.config import SCORE_DAILY_DIGEST, SCORE_INSTANT_ALERT
 from tracker.scorer import compute_market_averages, score_listing
-from tracker.sources.carapis import fetch_carapis as _fetch_carapis_all
+from tracker.sources.autotrader import fetch_autotrader
 from tracker.sources.carfax import fetch_carfax
-from tracker.sources.cargurus import fetch_cargurus
 from tracker.sources.enterprise import fetch_enterprise
 from tracker.sources.marketcheck import fetch_marketcheck
 from tracker.store import (
@@ -41,9 +40,8 @@ def main() -> None:
 
     sources = {
         "marketcheck": fetch_marketcheck,
-        "cargurus": fetch_cargurus,      # deal ratings + VIN-matched signals
-        "carapis": _fetch_carapis_all,
-        "carfax": fetch_carfax,
+        "autotrader": fetch_autotrader,  # deal ratings + VIN cross-reference
+        "carfax": fetch_carfax,          # accident/owner/service history signals
         # Enterprise last — scraper, most fragile
         "enterprise": fetch_enterprise,
     }
