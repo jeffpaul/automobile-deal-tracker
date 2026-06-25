@@ -117,21 +117,70 @@ if carapis_key:
         except Exception as e:
             check(f"POST {label}", False, str(e)[:80])
 
-    if working:
-        # Test all 6 source parsers
-        print(f"\n  Testing all 6 Carapis parsers at {working}:")
-        for src in ["cargurus", "autotrader-com", "cars-com", "carmax", "carvana", "truecar"]:
-            url = working.format(source=src) if "{source}" in working else working
-            try:
-                r = requests.post(url, json={**payload, "source": src}, headers=headers, timeout=10)
-                if r.ok:
-                    data = r.json()
-                    n = len(data) if isinstance(data, list) else data.get("total", "?")
-                    check(src, True, f"{n} results")
-                else:
-                    check(src, False, f"HTTP {r.status_code}: {r.text[:80]}")
-            except Exception as e:
-                check(src, False, str(e)[:80])
+    # --- Probe the actual Carapis catalog API ---
+    print("\n  Probing Carapis catalog API structure:")
+    BASE = "https://api.carapis.com"
+
+    # Try different auth header formats
+    auth_formats = [
+        {"Authorization": f"Bearer {carapis_key}"},
+        {"Authorization": f"Api-Key {carapis_key}"},
+        {"X-Api-Key": carapis_key},
+        {"Authorization": f"Token {carapis_key}"},
+    ]
+    working_headers = None
+    for hdrs in auth_formats:
+        try:
+            r = requests.get(f"{BASE}/apix/catalog_api/sources/", headers=hdrs, timeout=10)
+            label = list(hdrs.keys())[0] + ": " + list(hdrs.values())[0][:12] + "…"
+            if r.ok:
+                check(f"Auth header ({list(hdrs.keys())[0]})", True, f"HTTP {r.status_code}")
+                working_headers = hdrs
+                break
+            else:
+                check(f"Auth header ({list(hdrs.keys())[0]})", False, f"HTTP {r.status_code}: {r.text[:60]}")
+        except Exception as e:
+            check(f"Auth probe failed", False, str(e)[:60])
+
+    if working_headers:
+        # List US-region sources
+        try:
+            r = requests.get(f"{BASE}/apix/catalog_api/sources/", headers=working_headers, timeout=10)
+            if r.ok:
+                sources = r.json()
+                items = sources.get("results", sources) if isinstance(sources, dict) else sources
+                us_sources = [s for s in items if "us" in str(s.get("region","")).lower()
+                              or "united states" in str(s.get("country","")).lower()
+                              or "autotrader" in str(s.get("name","")).lower()
+                              or "cargurus" in str(s.get("name","")).lower()
+                              or "cars.com" in str(s.get("name","")).lower()]
+                print(f"\n  Available sources (first 10):")
+                for s in items[:10]:
+                    print(f"    slug={s.get('slug','?')} name={s.get('name','?')} availability={s.get('availability','?')} region={s.get('region','?')}")
+                if us_sources:
+                    print(f"\n  US-looking sources:")
+                    for s in us_sources:
+                        print(f"    slug={s.get('slug','?')} name={s.get('name','?')} availability={s.get('availability','?')}")
+        except Exception as e:
+            check("Sources list", False, str(e)[:80])
+
+        # Try vehicles endpoint with Jeep Wrangler 4xe filters
+        try:
+            r = requests.get(f"{BASE}/apix/catalog_api/vehicles/", headers=working_headers,
+                             params={"brand": "jeep", "fuel_type": "plug_hybrid", "min_year": 2023,
+                                     "page_size": 3, "available_only": "true"}, timeout=10)
+            if r.ok:
+                data = r.json()
+                total = data.get("count", data.get("total", "?")) if isinstance(data, dict) else len(data)
+                results = data.get("results", data) if isinstance(data, dict) else data
+                check("GET /apix/catalog_api/vehicles/ (Jeep plug_hybrid 2023+)", True, f"total={total}")
+                for v in results[:2]:
+                    print(f"    {v.get('year','?')} {v.get('brand_slug','?')} {v.get('model_slug','?')} "
+                          f"${v.get('price','?')} source={v.get('source','?')}")
+            else:
+                check("GET /apix/catalog_api/vehicles/", False, f"HTTP {r.status_code}: {r.text[:120]}")
+        except Exception as e:
+            check("Vehicles endpoint", False, str(e)[:80])
 
 
 # ─── Apify / CARFAX ───────────────────────────────────

@@ -10,7 +10,8 @@
       "Bash(grep -v \"^$\")",
       "Bash(pip install *)",
       "Bash(python3 scripts/validate_keys.py)",
-      "Bash(pip3 install *)"
+      "Bash(pip3 install *)",
+      "Bash(git commit -m 'chore: update validate_keys to probe actual Carapis catalog API structure *)"
     ]
   }
 }
