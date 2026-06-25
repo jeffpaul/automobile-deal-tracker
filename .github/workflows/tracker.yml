@@ -1,0 +1,61 @@
+name: Jeep 4xe tracker
+
+on:
+  schedule:
+    # 8am, 2pm, 8pm Central (CDT = UTC-5; CST = UTC-6)
+    - cron: '0 13,19,01 * * *'
+  workflow_dispatch:
+
+jobs:
+  run-tracker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium --with-deps
+
+      - name: Restore database
+        uses: actions/cache@v4
+        with:
+          path: data/listings.db
+          key: listings-db-${{ github.run_id }}
+          restore-keys: listings-db-
+
+      - name: Run tracker
+        env:
+          MARKETCHECK_API_KEY: ${{ secrets.MARKETCHECK_API_KEY }}
+          CARAPIS_API_KEY: ${{ secrets.CARAPIS_API_KEY }}
+          APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+          ALERT_EMAIL_FROM: ${{ secrets.ALERT_EMAIL_FROM }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: python -m tracker.main
+
+      - name: Save database cache
+        uses: actions/cache@v4
+        with:
+          path: data/listings.db
+          key: listings-db-${{ github.run_id }}
+
+      - name: Commit updated database
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/listings.db
+          git diff --staged --quiet || git commit -m "chore: update listings db [skip ci]"
+          git push
