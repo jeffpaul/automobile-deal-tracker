@@ -34,7 +34,7 @@ def _run_actor(model_query: str) -> list[dict]:
     payload = {
         "make": "Jeep",
         "model": model_query,
-        "zipCode": SEARCH_ZIP,
+        "zip": SEARCH_ZIP,
         "radius": str(SEARCH_RADIUS_MILES),
         "yearMin": str(YEAR_MIN),
         "yearMax": str(YEAR_MAX),
