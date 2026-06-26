@@ -9,7 +9,6 @@ import time
 from typing import Any
 
 import requests
-from tenacity import retry, stop_after_attempt, wait_exponential
 
 from tracker.config import APIFY_API_TOKEN, SEARCH_ZIP, SEARCH_RADIUS_MILES, YEAR_MIN, YEAR_MAX
 
@@ -22,15 +21,15 @@ MAX_POLLS = 18   # 3 minutes max per query — "Wrangler" with 100 items hangs i
 ACTOR_TIMEOUT = 150  # seconds — Apify-side hard stop; must exceed expected run time
 
 
-@retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=2, min=5, max=30))
 def _run_actor(model_query: str) -> list[dict]:
     payload = {
         "make": "Jeep",
         "model": model_query,
         "zipCode": SEARCH_ZIP,
         "radius": str(SEARCH_RADIUS_MILES),
-        # 30 items completes in ~20s; 100 causes "Wrangler" runs to hang indefinitely
-        "maxItems": 30,
+        # 10 items keeps runs well under the 150s Apify timeout; retry not used
+        # because CARFAX is best-effort — retrying a timeout just wastes 5+ min
+        "maxItems": 10,
     }
 
     resp = requests.post(
