@@ -18,7 +18,8 @@ logger = logging.getLogger(__name__)
 ACTOR_ID = "parseforge~carfax-scraper"
 APIFY_BASE = "https://api.apify.com/v2"
 POLL_INTERVAL = 10
-MAX_POLLS = 30  # 5 minutes max
+MAX_POLLS = 18   # 3 minutes max per query — "Wrangler" with 100 items hangs indefinitely
+ACTOR_TIMEOUT = 150  # seconds — Apify-side hard stop; must exceed expected run time
 
 
 @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=2, min=5, max=30))
@@ -28,12 +29,13 @@ def _run_actor(model_query: str) -> list[dict]:
         "model": model_query,
         "zipCode": SEARCH_ZIP,
         "radius": str(SEARCH_RADIUS_MILES),
-        "maxItems": 100,
+        # 30 items completes in ~20s; 100 causes "Wrangler" runs to hang indefinitely
+        "maxItems": 30,
     }
 
     resp = requests.post(
         f"{APIFY_BASE}/acts/{ACTOR_ID}/runs",
-        params={"token": APIFY_API_TOKEN, "memory": 1024},
+        params={"token": APIFY_API_TOKEN, "memory": 1024, "timeout": ACTOR_TIMEOUT},
         json=payload,
         timeout=30,
     )
@@ -45,6 +47,7 @@ def _run_actor(model_query: str) -> list[dict]:
     run_id = run_data["id"]
     dataset_id = run_data["defaultDatasetId"]
 
+    final_status = None
     for _ in range(MAX_POLLS):
         time.sleep(POLL_INTERVAL)
         status_resp = requests.get(
@@ -52,11 +55,13 @@ def _run_actor(model_query: str) -> list[dict]:
             params={"token": APIFY_API_TOKEN},
             timeout=15,
         )
-        status = status_resp.json()["data"]["status"]
-        if status == "SUCCEEDED":
+        final_status = status_resp.json()["data"]["status"]
+        if final_status == "SUCCEEDED":
             break
-        if status in ("FAILED", "ABORTED", "TIMED-OUT"):
-            raise RuntimeError(f"CARFAX Apify run {run_id} ended with status {status}")
+        if final_status in ("FAILED", "ABORTED", "TIMED-OUT"):
+            raise RuntimeError(f"CARFAX Apify run {run_id} ended with status {final_status}")
+    else:
+        raise RuntimeError(f"CARFAX Apify run {run_id} still {final_status} after {MAX_POLLS * POLL_INTERVAL}s — giving up")
 
     items_resp = requests.get(
         f"{APIFY_BASE}/datasets/{dataset_id}/items",
