@@ -152,3 +152,7 @@ A fork inherits this repo's actual `data/listings.db` — real (but public) deal
 ### Everything else
 
 `tracker/main.py`, `tracker/store.py`, and `tracker/sources/*.py` are already generic and data-driven off `VEHICLES` — they shouldn't need changes for a different vehicle set.
+
+## License
+
+[MIT](LICENSE) — fork it, customize it, use it for whatever you want.
