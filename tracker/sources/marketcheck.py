@@ -102,6 +102,7 @@ def fetch_marketcheck() -> list[dict[Any, Any]]:
         make = vehicle["make"]
         model_label = vehicle["model_label"]
         query = vehicle["mc_model"]
+        vehicle_count = 0
         start = 0
         while True:
             try:
@@ -118,11 +119,14 @@ def fetch_marketcheck() -> list[dict[Any, Any]]:
                 norm = _normalize(raw, make, model_label)
                 if norm["vin"]:
                     results.append(norm)
+                    vehicle_count += 1
 
             total = data.get("totalCount") or data.get("num_found", 0)
             start += len(listings)
             if start >= min(total, MAX_ROWS) or not listings:
                 break
 
-    logger.info("MarketCheck: fetched %d listings", len(results))
+        logger.info("MarketCheck: %s %s -> %d listings", make, model_label, vehicle_count)
+
+    logger.info("MarketCheck: fetched %d listings total", len(results))
     return results

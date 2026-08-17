@@ -158,6 +158,7 @@ def fetch_carfax() -> list[dict[str, Any]]:
             logger.error("CARFAX Apify actor failed for %s: %s", query, e)
             continue
 
+        vehicle_count = 0
         for item in items:
             year = item.get("year") or 0
             trim = item.get("trim") or ""
@@ -168,6 +169,12 @@ def fetch_carfax() -> list[dict[str, Any]]:
             norm = _normalize(item, vehicle["make"], vehicle["model_label"])
             if norm:
                 results.append(norm)
+                vehicle_count += 1
 
-    logger.info("CARFAX: fetched %d listings", len(results))
+        logger.info(
+            "CARFAX: %s %s -> %d listings (%d raw before trim/year filter)",
+            vehicle["make"], vehicle["model_label"], vehicle_count, len(items),
+        )
+
+    logger.info("CARFAX: fetched %d listings total", len(results))
     return results

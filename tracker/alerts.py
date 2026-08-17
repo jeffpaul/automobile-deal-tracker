@@ -347,7 +347,7 @@ def send_daily_digest(
   trim, so their trim scoring is a lighter nudge (wheel size, standard heated packages) rather than
   this dedicated table — see <code>scorer.py</code> for those weights.</p>
   {TRIM_GUIDE_HTML}
-  <p style="font-size:11px;color:#999;margin-top:24px">PHEV/4xe Deal Tracker · Runs 3× daily · Scores calibrated for teen driver, Chicago winter conditions</p>
+  <p style="font-size:11px;color:#999;margin-top:24px">PHEV/4xe Deal Tracker · Runs daily · Scores calibrated for teen driver, Chicago winter conditions</p>
 </body></html>"""
 
     return _send_email(subject, body)

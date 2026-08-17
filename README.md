@@ -1,6 +1,6 @@
 # PHEV/4xe Deal Tracker
 
-Automated deal tracker for plug-in hybrid SUVs, tuned for **winter daily driver** use in the Chicago area. Runs 3× daily via GitHub Actions, pulls inventory from MarketCheck and CARFAX, scores each listing 0–100, and emails alerts for great deals.
+Automated deal tracker for plug-in hybrid SUVs, tuned for **winter daily driver** use in the Chicago area. Runs daily via GitHub Actions, pulls inventory from MarketCheck and CARFAX, scores each listing 0–100, and emails alerts for great deals.
 
 ### Tracked vehicles
 
@@ -85,7 +85,7 @@ python -m tracker.main
 1. Push to GitHub
 2. Go to **Settings → Secrets and variables → Actions**
 3. Add all variables from `.env.example` as repository secrets
-4. The workflow runs automatically at **8am, 2pm, and 8pm Central time**
+4. The workflow runs automatically at **8am Central time** daily
 
 ## Architecture
 
