@@ -1,7 +1,9 @@
 """CARFAX listing search via Apify actor (parseforge~carfax-scraper).
 
-CARFAX's search doesn't index "Wrangler 4xe" as a model — query by "Wrangler"
-and "Grand Cherokee" then filter for 4xe trims and target years post-fetch.
+CARFAX's search doesn't index powertrain-qualified names as their own model
+(e.g. "Wrangler 4xe", "Outlander PHEV") — each vehicle queries CARFAX's bare
+model name (see VEHICLES in config.py) and filters for the right trim/powertrain
+and target years post-fetch.
 """
 
 import logging
@@ -22,9 +24,9 @@ MAX_POLLS = 18   # 3 minutes max per query — "Wrangler" with 100 items hangs i
 ACTOR_TIMEOUT = 150  # seconds — Apify-side hard stop; must exceed expected run time
 
 
-def _run_actor(model_query: str) -> list[dict]:
+def _run_actor(make: str, model_query: str) -> list[dict]:
     payload = {
-        "make": "Jeep",
+        "make": make,
         "model": model_query,
         "zipCode": SEARCH_ZIP,
         "radius": str(SEARCH_RADIUS_MILES),
@@ -153,9 +155,9 @@ def fetch_carfax() -> list[dict[str, Any]]:
     for vehicle in VEHICLES:
         query = vehicle["carfax_model"]
         try:
-            items = _run_actor(query)
+            items = _run_actor(vehicle["make"], query)
         except Exception as e:
-            logger.error("CARFAX Apify actor failed for %s: %s", query, e)
+            logger.error("CARFAX Apify actor failed for %s %s: %s", vehicle["make"], query, e)
             continue
 
         vehicle_count = 0
