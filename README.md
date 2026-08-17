@@ -49,8 +49,8 @@ Calibrated for a teen driver in Chicago winter conditions — **not** off-road c
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/jeep-4xe-search
-cd jeep-4xe-search
+git clone https://github.com/YOUR_USERNAME/automobile-deal-tracker
+cd automobile-deal-tracker
 pip install -r requirements.txt
 ```
 
@@ -118,16 +118,35 @@ SQLite at `data/listings.db`. Persisted between GitHub Actions runs via Actions 
 - `listings` — one row per VIN, merged from all sources, with full price history as JSON
 - `runs` — one row per tracker run with stats and per-source health flags
 
-## Customizing
+## Fork & Customize
 
-Key constants in [`tracker/config.py`](tracker/config.py):
+This started as a Jeep-only tracker and grew into a general one — everything below is the actual extension point if you want to track a completely different set of vehicles.
 
-| Constant | Default | Description |
-|----------|---------|-------------|
-| `SEARCH_ZIP` | `60515` | Center of search radius (Downers Grove, IL) |
-| `SEARCH_RADIUS_MILES` | `100` | Search radius |
-| `VEHICLES` | 5 vehicles (see Tracked vehicles above) | Add/remove/adjust tracked make/model/year combos |
-| `SCORE_INSTANT_ALERT` | `65` | Minimum score for instant email |
-| `SCORE_DAILY_DIGEST` | `45` | Minimum score for digest inclusion |
+### Change what's tracked
 
-Trim scoring weights are in [`tracker/scorer.py`](tracker/scorer.py) — `TRIM_VALUE_WEIGHTS` (Jeep), `OUTLANDER_PHEV_TRIM_WEIGHTS`, `TUCSON_PHEV_TRIM_WEIGHTS`, `RAV4_PRIME_TRIM_WEIGHTS`.
+Edit the `VEHICLES` list in [`tracker/config.py`](tracker/config.py). Each entry is:
+
+| Field | Meaning |
+|-------|---------|
+| `make` / `model_label` | Display name used in emails and the DB |
+| `mc_model` | The model string to query MarketCheck with |
+| `mc_powertrain_type` | Set to `"PHEV"` if the model needs a powertrain filter to isolate it from gas/hybrid siblings sharing the same trim names (see Data sources below); `None` if the model string alone is enough |
+| `carfax_model` | The bare model name to query CARFAX with, or `None` to skip CARFAX for this vehicle entirely (see Data sources — CARFAX can't always tell PHEV/4xe trims apart from gas ones) |
+| `carfax_trim_filter` | A word that must appear in the CARFAX trim string to count as a match (e.g. `"4xe"`), or `None` |
+| `year_min` / `year_max` | Soft target range — a few years on either side are fine, since price scoring naturally penalizes outliers rather than needing a hard cutoff |
+
+Before committing to a `mc_model`/`mc_powertrain_type` combination for a new vehicle, verify it against the live API the way this repo's own vehicles were verified — query MarketCheck directly with a small `rows` value for a few candidate model strings and check `totalCount` and `build.powertrain_type` in the response, rather than assuming a compound string like `"<Model> <Trim/Powertrain>"` will work. Some manufacturers' plug-in variants get their own distinct MC model (like Wrangler 4xe); most don't.
+
+Also adjust `SEARCH_ZIP` / `SEARCH_LOCATION` / `SEARCH_RADIUS_MILES` and `SCORE_INSTANT_ALERT` / `SCORE_DAILY_DIGEST` in the same file.
+
+### Change how it scores
+
+[`tracker/scorer.py`](tracker/scorer.py) is calibrated specifically for **this repo's original use case** — a teen driver's winter daily commute in Chicago — and it shows: `TRIM_VALUE_WEIGHTS` (Jeep) and the `OUTLANDER_PHEV_TRIM_WEIGHTS` / `TUCSON_PHEV_TRIM_WEIGHTS` / `RAV4_PRIME_TRIM_WEIGHTS` tables, `COLD_WEATHER_GROUP_BONUS`, and `is_winter_penalized_trim()` all encode snow/ice-specific tradeoffs (all-season vs. mud-terrain tires, heated seat packages, wheel size). The regen-braking driving note in `alerts.py` is the same kind of thing. If you're tracking different vehicles, a different climate, or a different priority entirely (performance, off-road capability, resale value), **replace these tables and functions rather than just adding to them** — they aren't a generic framework, they're one person's specific set of tradeoffs made explicit in code.
+
+### Fresh data
+
+A fork inherits this repo's actual `data/listings.db` — real (but public) dealer listings from whatever this instance has been tracking. If you're tracking different vehicles, just delete the file locally; `init_db()` recreates the schema on the next run.
+
+### Everything else
+
+`tracker/main.py`, `tracker/store.py`, and `tracker/sources/*.py` are already generic and data-driven off `VEHICLES` — they shouldn't need changes for a different vehicle set.

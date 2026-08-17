@@ -34,7 +34,6 @@ jobs:
       - name: Run tracker
         env:
           MARKETCHECK_API_KEY: ${{ secrets.MARKETCHECK_API_KEY }}
-          CARAPIS_API_KEY: ${{ secrets.CARAPIS_API_KEY }}
           APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
           ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
           ALERT_EMAIL_FROM: ${{ secrets.ALERT_EMAIL_FROM }}

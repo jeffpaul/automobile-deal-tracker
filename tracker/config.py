@@ -5,7 +5,6 @@ load_dotenv()
 
 # API keys
 MARKETCHECK_API_KEY = os.environ.get("MARKETCHECK_API_KEY", "")
-CARAPIS_API_KEY = os.environ.get("CARAPIS_API_KEY", "")
 APIFY_API_TOKEN = os.environ.get("APIFY_API_TOKEN", "")
 
 # Email
