@@ -154,6 +154,11 @@ def fetch_carfax() -> list[dict[str, Any]]:
     results = []
     for vehicle in VEHICLES:
         query = vehicle["carfax_model"]
+        if not query:
+            # No reliable PHEV signal available from this actor for this
+            # vehicle (see VEHICLES comment in config.py) — MarketCheck-only.
+            logger.info("CARFAX: skipping %s %s (no reliable trim signal)", vehicle["make"], vehicle["model_label"])
+            continue
         try:
             items = _run_actor(vehicle["make"], query)
         except Exception as e:

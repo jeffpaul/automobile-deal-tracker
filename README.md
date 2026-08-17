@@ -103,9 +103,9 @@ tracker/
 
 ### Data sources
 
-**MarketCheck** (primary) — provides price, trim, mileage, days on market, dealer info, `ref_price` (market value estimate), `price_change_percent`, and embedded CARFAX signals (`carfax_1_owner`, `carfax_clean_title`) on every listing.
+**MarketCheck** (primary) — provides price, trim, mileage, days on market, dealer info, `ref_price` (market value estimate), `price_change_percent`, and embedded CARFAX signals (`carfax_1_owner`, `carfax_clean_title`) on every listing. Wrangler 4xe is its own distinct MC model, but Grand Cherokee 4xe, Outlander PHEV, Tucson PHEV, and RAV4 Prime are not broken out as separate models in MC's taxonomy — they're queried as the base model (`"Grand Cherokee"`, `"Outlander"`, etc.) filtered server-side by `build.powertrain_type == "PHEV"`, which cleanly separates them from gas/hybrid trims sharing the same trim names.
 
-**CARFAX via Apify** (`parseforge/carfax-scraper`) — provides richer history signals: `noAccidents`, `oneOwner`, CARFAX badge (Great/Good Value), and option lists used to detect Cold Weather Group equipment. CARFAX doesn't index powertrain-qualified names as their own model (e.g. "Wrangler 4xe", "Outlander PHEV") — each vehicle queries CARFAX's bare model name and filters post-fetch by matching a keyword against the trim string (`"4xe"`, `"phev"`, or `"prime"` depending on vehicle — see `carfax_trim_filter` in `tracker/config.py`).
+**CARFAX via Apify** (`parseforge/carfax-scraper`) — provides richer history signals: `noAccidents`, `oneOwner`, CARFAX badge (Great/Good Value), and option lists used to detect Cold Weather Group equipment. CARFAX doesn't index "Wrangler 4xe"/"Grand Cherokee 4xe" as their own model, so those two query CARFAX's bare model name and filter post-fetch for `"4xe"` in the trim string. CARFAX is **skipped entirely** for Outlander PHEV, Tucson PHEV, and RAV4 Prime — the actor exposes no fuel-type/powertrain field, and their trim names ("SE", "SEL", "Limited") are identical between the PHEV and gas/hybrid versions, so there's no reliable way to tell them apart from CARFAX data alone. Those three rely on MarketCheck only (see below).
 
 ### Deduplication
 

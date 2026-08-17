@@ -22,24 +22,41 @@ SEARCH_LOCATION = "Downers Grove, IL"
 SEARCH_RADIUS_MILES = 100
 
 # Tracked vehicles. Each drives an independent MarketCheck + CARFAX query since
-# year range and CARFAX model-name quirks differ per vehicle. Year ranges are
-# soft — a couple of extra newer/older years are included on each side since
-# price naturally penalizes outliers rather than needing a hard cutoff.
+# year range, MC model taxonomy, and CARFAX model-name quirks all differ per
+# vehicle. Year ranges are soft — a couple of extra newer/older years are
+# included on each side since price naturally penalizes outliers rather than
+# needing a hard cutoff.
 #
 # All trims are tracked (not locked to one), same as the Jeep 4xe trims —
 # scorer.py biases toward trims that do better in winter conditions (standard
 # AWD/S-AWC, heated seat/wheel packages, smaller wheels for better snow
 # traction) rather than filtering other trims out entirely.
 #
+# MarketCheck model/powertrain taxonomy (verified against the live API):
+# MC tags Wrangler 4xe as its own distinct model, but Grand Cherokee 4xe,
+# Outlander PHEV, Tucson PHEV, and RAV4 Prime are NOT broken out as separate
+# models — they're the base model (mc_model) plus build.powertrain_type ==
+# "PHEV" (mc_powertrain_type), which cleanly separates them from gas/hybrid
+# trims that share the same trim names (e.g. RAV4 Hybrid and RAV4 Prime both
+# come in "SE"/"XSE"). A hard-coded "Grand Cherokee 4xe"/"Tucson PHEV"/"RAV4
+# Prime" model string returns literally 0 MC results for all three — this
+# isn't a guess, it's a discovered API bug/quirk in this codebase's original
+# 2-vehicle version that only surfaced once Grand Cherokee 4xe was checked.
+#
 # carfax_model is the bare model name CARFAX indexes (it doesn't recognize
-# powertrain-qualified names like "Wrangler 4xe" or "Outlander PHEV" as a
-# distinct model — see carfax_trim_filter, matched as a whole word against
-# the CARFAX trim string post-fetch).
+# powertrain-qualified names like "Wrangler 4xe" as a distinct model — see
+# carfax_trim_filter, matched as a whole word against the CARFAX trim string
+# post-fetch). CARFAX exposes no fuel-type/powertrain field, and for the non-
+# Jeep PHEVs the trim string alone can't distinguish PHEV from gas/hybrid
+# (same "SE"/"SEL"/"Limited" names are shared across powertrains) — so
+# carfax_model is None for those three, meaning CARFAX is skipped entirely
+# rather than risk mislabeling a gas Outlander/Tucson/RAV4 as a PHEV.
 VEHICLES = [
     {
         "make": "Jeep",
         "model_label": "Wrangler 4xe",
         "mc_model": "Wrangler 4xe",
+        "mc_powertrain_type": None,
         "carfax_model": "Wrangler",
         "carfax_trim_filter": "4xe",
         "year_min": 2023,
@@ -48,7 +65,8 @@ VEHICLES = [
     {
         "make": "Jeep",
         "model_label": "Grand Cherokee 4xe",
-        "mc_model": "Grand Cherokee 4xe",
+        "mc_model": "Grand Cherokee",
+        "mc_powertrain_type": "PHEV",
         "carfax_model": "Grand Cherokee",
         "carfax_trim_filter": "4xe",
         "year_min": 2023,
@@ -57,38 +75,30 @@ VEHICLES = [
     {
         "make": "Mitsubishi",
         "model_label": "Outlander PHEV",
-        "mc_model": "Outlander PHEV",
-        "carfax_model": "Outlander",
-        # CARFAX doesn't expose a fuel-type field in this actor's response, so
-        # PHEV vs. gas Outlander is inferred from "phev" appearing in the trim
-        # string. Verify against real output on first run and adjust if the
-        # actor formats it differently (or doesn't expose it at all, in which
-        # case CARFAX data for this vehicle will come back empty — MarketCheck
-        # remains the primary/reliable source regardless).
-        "carfax_trim_filter": "phev",
+        "mc_model": "Outlander",
+        "mc_powertrain_type": "PHEV",
+        "carfax_model": None,
+        "carfax_trim_filter": None,
         "year_min": 2023,
         "year_max": 2025,
     },
     {
         "make": "Hyundai",
         "model_label": "Tucson PHEV",
-        "mc_model": "Tucson PHEV",
-        "carfax_model": "Tucson",
-        "carfax_trim_filter": "phev",
+        "mc_model": "Tucson",
+        "mc_powertrain_type": "PHEV",
+        "carfax_model": None,
+        "carfax_trim_filter": None,
         "year_min": 2022,
         "year_max": 2025,
     },
     {
         "make": "Toyota",
         "model_label": "RAV4 Prime",
-        "mc_model": "RAV4 Prime",
-        "carfax_model": "RAV4",
-        # Assumes CARFAX's trim string includes "Prime" (e.g. "SE Prime"), same
-        # pattern as Jeep's "Sahara 4xe" — unverified until the first live run;
-        # if CARFAX doesn't fold it into the trim string, this vehicle will get
-        # 0 CARFAX matches and fall back to MarketCheck-only data, same as any
-        # other CARFAX miss.
-        "carfax_trim_filter": "prime",
+        "mc_model": "RAV4",
+        "mc_powertrain_type": "PHEV",
+        "carfax_model": None,
+        "carfax_trim_filter": None,
         "year_min": 2021,
         "year_max": 2025,
     },

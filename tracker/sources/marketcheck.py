@@ -18,7 +18,7 @@ MAX_ROWS = 1500
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-def _fetch_page(make: str, model: str, year_min: int, year_max: int, start: int) -> dict:
+def _fetch_page(make: str, model: str, powertrain_type: str | None, year_min: int, year_max: int, start: int) -> dict:
     params = {
         "api_key": MARKETCHECK_API_KEY,
         "make": make,
@@ -30,6 +30,12 @@ def _fetch_page(make: str, model: str, year_min: int, year_max: int, start: int)
         "start": start,
         "include_relevant_links": "true",
     }
+    if powertrain_type:
+        # Server-side filter — several tracked models (Grand Cherokee 4xe,
+        # Outlander PHEV, Tucson PHEV, RAV4 Prime) aren't broken out as their
+        # own MC model, so this is what actually isolates the PHEV trims from
+        # gas/hybrid siblings sharing the same trim names.
+        params["powertrain_type"] = powertrain_type
     resp = requests.get(BASE_URL, params=params, timeout=30)
     if not resp.ok:
         logger.error("MarketCheck HTTP %s: %s", resp.status_code, resp.text[:400])
@@ -102,11 +108,12 @@ def fetch_marketcheck() -> list[dict[Any, Any]]:
         make = vehicle["make"]
         model_label = vehicle["model_label"]
         query = vehicle["mc_model"]
+        powertrain_type = vehicle.get("mc_powertrain_type")
         vehicle_count = 0
         start = 0
         while True:
             try:
-                data = _fetch_page(make, query, vehicle["year_min"], vehicle["year_max"], start)
+                data = _fetch_page(make, query, powertrain_type, vehicle["year_min"], vehicle["year_max"], start)
             except Exception as e:
                 logger.error("MarketCheck page fetch failed for %s at start=%d: %s", query, start, e)
                 break
