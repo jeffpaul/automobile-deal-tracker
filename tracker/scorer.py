@@ -1,8 +1,9 @@
 """Deal scoring — calibrated for winter daily driver use case, not off-road."""
 
+import re
 from typing import Any
 
-# Trim weights: Sahara/High Altitude preferred; Willys/Rubicon penalized.
+# Jeep 4xe trim weights: Sahara/High Altitude preferred; Willys/Rubicon penalized.
 # M/T tires on Willys/Rubicon perform worse on packed snow/ice vs. all-season Sahara tires.
 TRIM_VALUE_WEIGHTS: dict[str, float] = {
     "High Altitude":  1.15,  # Best fit: Sahara base + adaptive cruise + safety tech standard
@@ -15,32 +16,83 @@ TRIM_VALUE_WEIGHTS: dict[str, float] = {
     "Sport":          0.75,
 }
 
+# Non-Jeep PHEVs ship AWD/S-AWC standard on every trim (unlike gas Wrangler
+# trims where tire compound varies wildly), so the winter differentiation
+# here is modest: wheel size (bigger wheels = lower-profile tires = worse
+# snow traction, same logic as the Jeep Rubicon penalty) and which trims
+# include heated seat/wheel packages standard vs. optional. This is a light
+# nudge, not a hard cut — the Cold Weather Group component already rewards
+# heated packages directly from CARFAX option data regardless of trim.
+OUTLANDER_PHEV_TRIM_WEIGHTS: dict[str, float] = {
+    "SE":  1.00,  # 18" wheels, heated front seats standard
+    "SEL": 1.05,  # 18" wheels, heated seats + wheel standard
+    "GT":  0.95,  # 20" wheels — lower-profile tires, less ideal for snow
+}
+
+TUCSON_PHEV_TRIM_WEIGHTS: dict[str, float] = {
+    "SEL":     1.00,
+    "LIMITED": 1.05,  # heated/ventilated seats, heated wheel, surround-view standard
+}
+
+RAV4_PRIME_TRIM_WEIGHTS: dict[str, float] = {
+    "SE":  1.05,  # 18" wheels; optional Weather Package adds heated seats/wheel
+    "XSE": 0.95,  # 19" wheels — lower-profile tires, less ideal for snow
+}
+
 COLD_WEATHER_GROUP_BONUS = 3  # pts: heated seats + wheel + remote start
 
 
-def _trim_weight(trim: str) -> float:
+def _trim_weight(model: str, trim: str) -> float:
     """Return the weight for a trim name, fuzzy-matching on partial strings.
     MarketCheck returns names like 'Sahara 4XE', 'High Altitude 4XE', etc.
     """
     lower = (trim or "").lower()
-    # Check most specific first to avoid 'rubicon x' matching 'rubicon'
-    if "high altitude" in lower:
-        return TRIM_VALUE_WEIGHTS["High Altitude"]
-    if "rubicon x" in lower:
-        return TRIM_VALUE_WEIGHTS["Rubicon X"]
-    if "sahara" in lower:
-        return TRIM_VALUE_WEIGHTS["Sahara"]
-    if "willys '41" in lower or "willys41" in lower:
-        return TRIM_VALUE_WEIGHTS["Willys '41"]
-    if "willys" in lower:
-        return TRIM_VALUE_WEIGHTS["Willys"]
-    if "rubicon" in lower:
-        return TRIM_VALUE_WEIGHTS["Rubicon"]
-    if "sport s" in lower:
-        return TRIM_VALUE_WEIGHTS["Sport S"]
-    if "sport" in lower:
-        return TRIM_VALUE_WEIGHTS["Sport"]
-    return 0.90  # Default for unknown trims
+    tokens = set(re.split(r"[\s/-]+", lower))
+
+    if model in ("Wrangler 4xe", "Grand Cherokee 4xe"):
+        # Check most specific first to avoid 'rubicon x' matching 'rubicon'
+        if "high altitude" in lower:
+            return TRIM_VALUE_WEIGHTS["High Altitude"]
+        if "rubicon x" in lower:
+            return TRIM_VALUE_WEIGHTS["Rubicon X"]
+        if "sahara" in lower:
+            return TRIM_VALUE_WEIGHTS["Sahara"]
+        if "willys '41" in lower or "willys41" in lower:
+            return TRIM_VALUE_WEIGHTS["Willys '41"]
+        if "willys" in lower:
+            return TRIM_VALUE_WEIGHTS["Willys"]
+        if "rubicon" in lower:
+            return TRIM_VALUE_WEIGHTS["Rubicon"]
+        if "sport s" in lower:
+            return TRIM_VALUE_WEIGHTS["Sport S"]
+        if "sport" in lower:
+            return TRIM_VALUE_WEIGHTS["Sport"]
+        return 0.90  # Default for unknown Jeep trims
+
+    if model == "Outlander PHEV":
+        if "gt" in tokens:
+            return OUTLANDER_PHEV_TRIM_WEIGHTS["GT"]
+        if "sel" in tokens:
+            return OUTLANDER_PHEV_TRIM_WEIGHTS["SEL"]
+        if "se" in tokens:
+            return OUTLANDER_PHEV_TRIM_WEIGHTS["SE"]
+        return 1.00
+
+    if model == "Tucson PHEV":
+        if "limited" in tokens:
+            return TUCSON_PHEV_TRIM_WEIGHTS["LIMITED"]
+        if "sel" in tokens:
+            return TUCSON_PHEV_TRIM_WEIGHTS["SEL"]
+        return 1.00
+
+    if model == "RAV4 Prime":
+        if "xse" in tokens:
+            return RAV4_PRIME_TRIM_WEIGHTS["XSE"]
+        if "se" in tokens:
+            return RAV4_PRIME_TRIM_WEIGHTS["SE"]
+        return 1.00
+
+    return 1.00  # Default for unrecognized model/trim combos
 
 
 def score_listing(listing: dict[str, Any], market_avg_for_trim: float | None) -> float:
@@ -92,7 +144,7 @@ def score_listing(listing: dict[str, Any], market_avg_for_trim: float | None) ->
         score += 1
 
     # 4. Trim value weight — winter/safety calibrated (max 12 pts)
-    w = _trim_weight(listing.get("trim", ""))
+    w = _trim_weight(listing.get("model", ""), listing.get("trim", ""))
     score += (w - 0.75) * 30  # Maps 0.75–1.15 → 0–12 pts
 
     # 5. Mileage (max 12 pts)
@@ -164,8 +216,14 @@ def score_listing(listing: dict[str, Any], market_avg_for_trim: float | None) ->
     return round(min(max(score, 0), 100), 1)
 
 
-def is_winter_penalized_trim(trim: str) -> bool:
-    """Return True if trim has M/T or A/T tires unsuitable for winter pavement."""
+def is_winter_penalized_trim(model: str, trim: str) -> bool:
+    """Return True if trim has M/T or A/T tires unsuitable for winter pavement.
+
+    Jeep-specific: the non-Jeep PHEVs' trim differences (wheel size) are a
+    much smaller winter penalty and don't warrant this callout treatment.
+    """
+    if model not in ("Wrangler 4xe", "Grand Cherokee 4xe"):
+        return False
     lower = (trim or "").lower()
     return "willys" in lower or ("rubicon" in lower and "rubicon x" not in lower)
 
@@ -239,7 +297,7 @@ def score_breakdown(listing: dict[str, Any], market_avg_for_trim: float | None) 
         components.append((f"CARFAX ({', '.join(cf_parts)})", cf_pts))
 
     # 4. Trim weight (max 12 pts)
-    w = _trim_weight(listing.get("trim", ""))
+    w = _trim_weight(listing.get("model", ""), listing.get("trim", ""))
     trim_pts = round((w - 0.75) * 30, 1)
     if trim_pts != 0:
         components.append((f"Trim ({listing.get('trim', '?')})", trim_pts))

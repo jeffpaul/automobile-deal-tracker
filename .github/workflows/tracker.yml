@@ -1,4 +1,4 @@
-name: Jeep 4xe tracker
+name: PHEV/4xe tracker
 
 on:
   schedule:

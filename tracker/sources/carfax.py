@@ -5,12 +5,13 @@ and "Grand Cherokee" then filter for 4xe trims and target years post-fetch.
 """
 
 import logging
+import re
 import time
 from typing import Any
 
 import requests
 
-from tracker.config import APIFY_API_TOKEN, SEARCH_ZIP, SEARCH_RADIUS_MILES, YEAR_MIN, YEAR_MAX
+from tracker.config import APIFY_API_TOKEN, SEARCH_ZIP, SEARCH_RADIUS_MILES, VEHICLES
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,20 @@ def _run_actor(model_query: str) -> list[dict]:
     return []
 
 
-def _normalize(item: dict, model_label: str) -> dict | None:
+def _trim_matches(trim: str, filter_word: str) -> bool:
+    """Whole-word, case-insensitive match against the trim string.
+
+    Plain substring matching would false-positive "SE" against "SEL"/"XSE" —
+    tokenizing on whitespace/hyphen/slash avoids that while still matching
+    "4xe" as an isolated token in strings like "Sahara 4xe".
+    """
+    if not filter_word:
+        return True
+    tokens = re.split(r"[\s/-]+", (trim or "").lower())
+    return filter_word.lower() in tokens
+
+
+def _normalize(item: dict, make: str, model_label: str) -> dict | None:
     vin = item.get("vin", "")
     if not vin:
         return None
@@ -108,6 +122,7 @@ def _normalize(item: dict, model_label: str) -> dict | None:
         "vin": vin,
         "source": "carfax",
         "year": item.get("year"),
+        "make": make,
         "model": model_label,
         "trim": item.get("trim", ""),
         "price": price,
@@ -134,14 +149,9 @@ def fetch_carfax() -> list[dict[str, Any]]:
         logger.warning("APIFY_API_TOKEN not set — skipping CARFAX")
         return []
 
-    # CARFAX search uses bare model names — filter for 4xe trims post-fetch
-    model_queries = {
-        "Wrangler 4xe": "Wrangler",
-        "Grand Cherokee 4xe": "Grand Cherokee",
-    }
-
     results = []
-    for model_label, query in model_queries.items():
+    for vehicle in VEHICLES:
+        query = vehicle["carfax_model"]
         try:
             items = _run_actor(query)
         except Exception as e:
@@ -151,12 +161,11 @@ def fetch_carfax() -> list[dict[str, Any]]:
         for item in items:
             year = item.get("year") or 0
             trim = item.get("trim") or ""
-            # Keep only 4xe trims in our year range
-            if "4xe" not in trim.lower():
+            if not _trim_matches(trim, vehicle["carfax_trim_filter"]):
                 continue
-            if not (YEAR_MIN <= int(year) <= YEAR_MAX):
+            if not (vehicle["year_min"] <= int(year) <= vehicle["year_max"]):
                 continue
-            norm = _normalize(item, model_label)
+            norm = _normalize(item, vehicle["make"], vehicle["model_label"])
             if norm:
                 results.append(norm)
 

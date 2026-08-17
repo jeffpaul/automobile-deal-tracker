@@ -6,7 +6,7 @@ from typing import Any
 import requests
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from tracker.config import MARKETCHECK_API_KEY, SEARCH_ZIP, SEARCH_RADIUS_MILES, YEAR_MIN, YEAR_MAX
+from tracker.config import MARKETCHECK_API_KEY, SEARCH_ZIP, SEARCH_RADIUS_MILES, VEHICLES
 
 logger = logging.getLogger(__name__)
 
@@ -18,14 +18,14 @@ MAX_ROWS = 1500
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-def _fetch_page(model: str, start: int) -> dict:
+def _fetch_page(make: str, model: str, year_min: int, year_max: int, start: int) -> dict:
     params = {
         "api_key": MARKETCHECK_API_KEY,
-        "make": "Jeep",
+        "make": make,
         "model": model,
         "zip": SEARCH_ZIP,
         "radius": SEARCH_RADIUS_MILES,
-        "year": ",".join(str(y) for y in range(YEAR_MIN, YEAR_MAX + 1)),
+        "year": ",".join(str(y) for y in range(year_min, year_max + 1)),
         "rows": PAGE_SIZE,
         "start": start,
         "include_relevant_links": "true",
@@ -37,7 +37,7 @@ def _fetch_page(model: str, start: int) -> dict:
     return resp.json()
 
 
-def _normalize(raw: dict, model_label: str) -> dict:
+def _normalize(raw: dict, make: str, model_label: str) -> dict:
     listing = raw.get("listing", raw)
     build = raw.get("build", {})
 
@@ -68,6 +68,7 @@ def _normalize(raw: dict, model_label: str) -> dict:
         "vin": listing.get("vin", ""),
         "source": "marketcheck",
         "year": build.get("year") or listing.get("year"),
+        "make": make,
         "model": model_label,
         "trim": build.get("trim") or listing.get("trim", ""),
         "price": listing.get("price"),
@@ -96,16 +97,15 @@ def fetch_marketcheck() -> list[dict[Any, Any]]:
         return []
 
     results = []
-    model_queries = {
-        "Wrangler 4xe": "Wrangler 4xe",
-        "Grand Cherokee 4xe": "Grand Cherokee 4xe",
-    }
 
-    for model_label, query in model_queries.items():
+    for vehicle in VEHICLES:
+        make = vehicle["make"]
+        model_label = vehicle["model_label"]
+        query = vehicle["mc_model"]
         start = 0
         while True:
             try:
-                data = _fetch_page(query, start)
+                data = _fetch_page(make, query, vehicle["year_min"], vehicle["year_max"], start)
             except Exception as e:
                 logger.error("MarketCheck page fetch failed for %s at start=%d: %s", query, start, e)
                 break
@@ -115,7 +115,7 @@ def fetch_marketcheck() -> list[dict[Any, Any]]:
                 break
 
             for raw in listings:
-                norm = _normalize(raw, model_label)
+                norm = _normalize(raw, make, model_label)
                 if norm["vin"]:
                     results.append(norm)
 

@@ -1,19 +1,35 @@
-# Jeep 4xe Deal Tracker
+# PHEV/4xe Deal Tracker
 
-Automated deal tracker for Jeep Wrangler 4xe and Grand Cherokee 4xe (2023–2025), tuned for **winter daily driver** use in the Chicago area. Runs 3× daily via GitHub Actions, pulls inventory from MarketCheck and CARFAX, scores each listing 0–100, and emails alerts for great deals.
+Automated deal tracker for plug-in hybrid SUVs, tuned for **winter daily driver** use in the Chicago area. Runs 3× daily via GitHub Actions, pulls inventory from MarketCheck and CARFAX, scores each listing 0–100, and emails alerts for great deals.
+
+### Tracked vehicles
+
+| Make | Model | Year range |
+|------|-------|-----------|
+| Jeep | Wrangler 4xe | 2023–2025 |
+| Jeep | Grand Cherokee 4xe | 2023–2025 |
+| Mitsubishi | Outlander PHEV | 2023–2025 |
+| Hyundai | Tucson PHEV | 2022–2025 |
+| Toyota | RAV4 Prime | 2021–2025 |
+
+Year ranges are soft targets, not hard cutoffs — a few extra newer/older years are included on each side since price naturally penalizes outliers in scoring rather than needing a strict filter. All trims are tracked for every vehicle (not locked to a single trim); trim scoring nudges toward configurations that do better in snow/ice. Add or adjust vehicles in [`tracker/config.py`](tracker/config.py) (`VEHICLES` list).
 
 ## Scoring rationale
 
-Calibrated for a teen driver in Chicago winter conditions — **not** off-road capability. The Sahara and High Altitude trims score highest because they ship with all-season tires, blind spot monitoring, and on-road suspension. The Willys and Rubicon are penalized because their mud-terrain tires perform worse on packed snow and ice.
+Calibrated for a teen driver in Chicago winter conditions — **not** off-road capability.
+
+**Jeep 4xe:** The Sahara and High Altitude trims score highest because they ship with all-season tires, blind spot monitoring, and on-road suspension. The Willys and Rubicon are penalized because their mud-terrain tires perform worse on packed snow and ice.
+
+**Outlander PHEV / Tucson PHEV / RAV4 Prime:** These ship AWD (or Mitsubishi's S-AWC) standard on every trim, so the trim-level winter penalty is much smaller than Jeep's — mainly wheel size (larger wheels/lower-profile tires trade off snow traction, same logic as the Jeep Rubicon penalty) and which trims include heated seat/wheel packages standard. See `OUTLANDER_PHEV_TRIM_WEIGHTS`, `TUCSON_PHEV_TRIM_WEIGHTS`, and `RAV4_PRIME_TRIM_WEIGHTS` in [`tracker/scorer.py`](tracker/scorer.py) — these are a light nudge, not a hard filter, since the Cold Weather Group component already rewards heated packages directly from CARFAX option data regardless of trim.
 
 ### Score components (max 100 pts)
 
 | Component | Max pts | Signal |
 |-----------|---------|--------|
-| Price vs. market average | 35 | How far below the average price for this trim |
+| Price vs. market average | 35 | How far below the average price for this model/trim |
 | Price vs. MC reference price | 15 | MarketCheck's per-car market value estimate |
 | CARFAX history | 15 | No accidents (+8), 1 owner (+4), Great Value badge (+3) |
-| Trim | 12 | High Altitude / Sahara preferred; Willys / Rubicon penalized |
+| Trim | 12 | Winter-favorable trims preferred (see Scoring rationale above) |
 | Mileage | 12 | Under 10k (+12) down to over 40k (−4) |
 | Days on market | 8 | Fresh listing (+8); stale 60d+ (−4) |
 | Price drop | 8 | Dealer cut or DB-tracked drop since first seen |
@@ -89,7 +105,7 @@ tracker/
 
 **MarketCheck** (primary) — provides price, trim, mileage, days on market, dealer info, `ref_price` (market value estimate), `price_change_percent`, and embedded CARFAX signals (`carfax_1_owner`, `carfax_clean_title`) on every listing.
 
-**CARFAX via Apify** (`parseforge/carfax-scraper`) — provides richer history signals: `noAccidents`, `oneOwner`, CARFAX badge (Great/Good Value), and option lists used to detect Cold Weather Group equipment. Queries `"Wrangler"` and `"Grand Cherokee"` (CARFAX doesn't index "4xe" as a model) and filters for 4xe trims post-fetch.
+**CARFAX via Apify** (`parseforge/carfax-scraper`) — provides richer history signals: `noAccidents`, `oneOwner`, CARFAX badge (Great/Good Value), and option lists used to detect Cold Weather Group equipment. CARFAX doesn't index powertrain-qualified names as their own model (e.g. "Wrangler 4xe", "Outlander PHEV") — each vehicle queries CARFAX's bare model name and filters post-fetch by matching a keyword against the trim string (`"4xe"`, `"phev"`, or `"prime"` depending on vehicle — see `carfax_trim_filter` in `tracker/config.py`).
 
 ### Deduplication
 
@@ -110,8 +126,8 @@ Key constants in [`tracker/config.py`](tracker/config.py):
 |----------|---------|-------------|
 | `SEARCH_ZIP` | `60515` | Center of search radius (Downers Grove, IL) |
 | `SEARCH_RADIUS_MILES` | `100` | Search radius |
-| `YEAR_MIN` / `YEAR_MAX` | `2023` / `2025` | Model year range |
+| `VEHICLES` | 5 vehicles (see Tracked vehicles above) | Add/remove/adjust tracked make/model/year combos |
 | `SCORE_INSTANT_ALERT` | `65` | Minimum score for instant email |
 | `SCORE_DAILY_DIGEST` | `45` | Minimum score for digest inclusion |
 
-Trim scoring weights are in [`tracker/scorer.py`](tracker/scorer.py) (`TRIM_VALUE_WEIGHTS`).
+Trim scoring weights are in [`tracker/scorer.py`](tracker/scorer.py) — `TRIM_VALUE_WEIGHTS` (Jeep), `OUTLANDER_PHEV_TRIM_WEIGHTS`, `TUCSON_PHEV_TRIM_WEIGHTS`, `RAV4_PRIME_TRIM_WEIGHTS`.

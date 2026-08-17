@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS listings (
     vin                   TEXT PRIMARY KEY,
     sources               TEXT,
     year                  INTEGER,
+    make                  TEXT,
     model                 TEXT,
     trim                  TEXT,
     price                 INTEGER,
@@ -77,6 +78,7 @@ def init_db() -> None:
     for col, typedef in [
         ("ref_price", "REAL"),
         ("price_change_percent", "REAL"),
+        ("make", "TEXT"),
     ]:
         try:
             conn.execute(f"ALTER TABLE listings ADD COLUMN {col} {typedef}")
@@ -115,7 +117,7 @@ def merge_listings(raw_listings: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
             # Merge: prefer non-None values; for scalars prefer later source if richer
             for field in (
-                "year", "model", "trim", "mileage", "city", "state",
+                "year", "make", "model", "trim", "mileage", "city", "state",
                 "dealer_name", "exterior_color", "days_on_market", "dealer_rating",
             ):
                 existing[field] = _coalesce(existing.get(field), item.get(field))
@@ -196,7 +198,7 @@ def upsert_listings(merged: list[dict[str, Any]]) -> dict[str, int]:
 
             conn.execute(
                 """UPDATE listings SET
-                    sources = ?, year = ?, model = ?, trim = ?, price = ?,
+                    sources = ?, year = ?, make = ?, model = ?, trim = ?, price = ?,
                     mileage = ?, city = ?, state = ?, dealer_name = ?,
                     listing_url = ?, exterior_color = ?, days_on_market = ?,
                     pricing_type = ?, source_type = ?,
@@ -211,6 +213,7 @@ def upsert_listings(merged: list[dict[str, Any]]) -> dict[str, int]:
                 (
                     lst.get("sources"),
                     lst.get("year"),
+                    lst.get("make"),
                     lst.get("model"),
                     lst.get("trim"),
                     lst.get("price"),
@@ -247,7 +250,7 @@ def upsert_listings(merged: list[dict[str, Any]]) -> dict[str, int]:
             stats["new"] += 1
             conn.execute(
                 """INSERT INTO listings (
-                    vin, sources, year, model, trim, price, mileage,
+                    vin, sources, year, make, model, trim, price, mileage,
                     city, state, dealer_name, listing_url, exterior_color,
                     days_on_market, pricing_type, source_type,
                     cargurus_deal_label, cargurus_deal_score, cargurus_explanation,
@@ -257,12 +260,13 @@ def upsert_listings(merged: list[dict[str, Any]]) -> dict[str, int]:
                     ref_price, price_change_percent,
                     composite_score, first_seen, last_seen, price_history, alerted
                 ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0
                 )""",
                 (
                     vin,
                     lst.get("sources"),
                     lst.get("year"),
+                    lst.get("make"),
                     lst.get("model"),
                     lst.get("trim"),
                     lst.get("price"),
@@ -328,29 +332,30 @@ def get_unalerted_great_deals(min_score: float = 80.0) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def get_price_trend(days: int = 7) -> dict[str, float | None]:
-    """Return average price per trim today vs. N days ago."""
+def get_price_trend(days: int = 7) -> dict[tuple, dict[str, float | None]]:
+    """Return average price per (model, trim) today vs. N days ago."""
     from datetime import timedelta
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     conn = _get_conn()
     rows = conn.execute(
-        "SELECT trim, price, last_seen FROM listings WHERE price IS NOT NULL"
+        "SELECT model, trim, price, last_seen FROM listings WHERE price IS NOT NULL"
     ).fetchall()
     conn.close()
 
-    today_prices: dict[str, list[float]] = {}
-    old_prices: dict[str, list[float]] = {}
+    today_prices: dict[tuple, list[float]] = {}
+    old_prices: dict[tuple, list[float]] = {}
     for r in rows:
+        key = (r["model"], r["trim"])
         if r["last_seen"] >= cutoff:
-            today_prices.setdefault(r["trim"], []).append(r["price"])
+            today_prices.setdefault(key, []).append(r["price"])
         else:
-            old_prices.setdefault(r["trim"], []).append(r["price"])
+            old_prices.setdefault(key, []).append(r["price"])
 
     trend = {}
-    for trim in set(list(today_prices.keys()) + list(old_prices.keys())):
-        today_avg = sum(today_prices.get(trim, [])) / len(today_prices[trim]) if today_prices.get(trim) else None
-        old_avg = sum(old_prices.get(trim, [])) / len(old_prices[trim]) if old_prices.get(trim) else None
-        trend[trim] = {"today": today_avg, "7d_ago": old_avg}
+    for key in set(list(today_prices.keys()) + list(old_prices.keys())):
+        today_avg = sum(today_prices.get(key, [])) / len(today_prices[key]) if today_prices.get(key) else None
+        old_avg = sum(old_prices.get(key, [])) / len(old_prices[key]) if old_prices.get(key) else None
+        trend[key] = {"today": today_avg, "7d_ago": old_avg}
     return trend
 
 
@@ -399,16 +404,17 @@ def get_market_snapshot() -> dict:
     listings = [dict(r) for r in rows]
     total = len(listings)
 
-    # Average price by trim
+    # Average price by (model, trim) — grouping by trim alone would blend
+    # e.g. "SE" across Outlander PHEV, Tucson PHEV, and RAV4 Prime
     from collections import defaultdict
-    trim_prices: dict[str, list[int]] = defaultdict(list)
+    model_trim_prices: dict[tuple, list[int]] = defaultdict(list)
     for lst in listings:
         if lst.get("trim") and lst.get("price"):
-            trim_prices[lst["trim"]].append(lst["price"])
+            model_trim_prices[(lst.get("model", ""), lst["trim"])].append(lst["price"])
 
-    avg_by_trim = {
-        trim: int(sum(prices) / len(prices))
-        for trim, prices in trim_prices.items()
+    avg_by_model_trim = {
+        key: int(sum(prices) / len(prices))
+        for key, prices in model_trim_prices.items()
     }
 
     # Listings with clean CARFAX signals
@@ -417,13 +423,16 @@ def get_market_snapshot() -> dict:
         if l.get("no_accidents") and l.get("one_owner")
     )
 
-    # Lowest Sahara or High Altitude
-    preferred_trims = [l for l in listings if "sahara" in (l.get("trim") or "").lower() or "high altitude" in (l.get("trim") or "").lower()]
-    lowest_preferred = min((l["price"] for l in preferred_trims if l.get("price")), default=None)
+    # Lowest price per tracked model
+    model_prices: dict[str, list[int]] = defaultdict(list)
+    for lst in listings:
+        if lst.get("model") and lst.get("price"):
+            model_prices[lst["model"]].append(lst["price"])
+    lowest_by_model = {model: min(prices) for model, prices in model_prices.items()}
 
     return {
         "total": total,
-        "avg_by_trim": avg_by_trim,
+        "avg_by_model_trim": avg_by_model_trim,
         "great_good_deal_count": great_good,
-        "lowest_sahara_high_altitude": lowest_preferred,
+        "lowest_by_model": lowest_by_model,
     }

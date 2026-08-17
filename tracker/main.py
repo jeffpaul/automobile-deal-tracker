@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    logger.info("Starting Jeep 4xe tracker run at %s", datetime.now(timezone.utc).isoformat())
+    logger.info("Starting PHEV/4xe tracker run at %s", datetime.now(timezone.utc).isoformat())
     init_db()
 
     all_listings: list[dict] = []

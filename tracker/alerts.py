@@ -1,4 +1,4 @@
-"""Email alerts — instant alerts for score ≥ 80, daily digest for score ≥ 65."""
+"""Email alerts — instant alerts for score >= instant threshold, daily digest for score >= digest threshold."""
 
 import json
 import logging
@@ -16,14 +16,14 @@ from tracker.config import (
     SMTP_USER,
     SMTP_PASSWORD,
 )
-from tracker.config import SEARCH_ZIP, SEARCH_RADIUS_MILES
+from tracker.config import SEARCH_ZIP, SEARCH_RADIUS_MILES, SCORE_DAILY_DIGEST
 from tracker.scorer import is_winter_penalized_trim, score_breakdown
 
 logger = logging.getLogger(__name__)
 
 REGEN_NOTE = (
-    "⚠️ <strong>4xe winter driving note:</strong> The 4xe's regenerative braking "
-    "creates more deceleration when lifting off the throttle than a conventional car — "
+    "⚠️ <strong>Plug-in hybrid winter driving note:</strong> Regenerative braking on these "
+    "PHEVs creates more deceleration when lifting off the throttle than a conventional car — "
     "on slippery surfaces this can feel abrupt for inexperienced drivers. "
     "Recommend a dedicated practice session in a snowy parking lot before solo winter driving."
 )
@@ -83,9 +83,9 @@ def send_low_inventory_warning(mc_count: int, source_errors: list[str]) -> bool:
 
     body = f"""
 <html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
-<h2 style="color:#cc0000">⚠️ Jeep 4xe Tracker — Low Inventory Warning</h2>
-<p>The tracker run at <strong>{ts}</strong> returned only <strong>{mc_count} MarketCheck listings</strong>,
-which is below the expected minimum of 10.</p>
+<h2 style="color:#cc0000">⚠️ PHEV/4xe Deal Tracker — Low Inventory Warning</h2>
+<p>The tracker run at <strong>{ts}</strong> returned only <strong>{mc_count} MarketCheck listings</strong>
+across all tracked vehicles, which is below the expected minimum of 10.</p>
 <p>This likely indicates one of:<br>
 <ul>
   <li>MarketCheck API quota exhaustion</li>
@@ -96,7 +96,7 @@ which is below the expected minimum of 10.</p>
 <p style="color:#666;font-size:12px">No deal digest was sent for this run. Check GitHub Actions logs for details.</p>
 </body></html>
 """
-    return _send_email("⚠️ Jeep 4xe Tracker: Low inventory warning", body)
+    return _send_email("⚠️ PHEV/4xe Deal Tracker: Low inventory warning", body)
 
 
 def _format_price(price: int | None) -> str:
@@ -118,6 +118,7 @@ def _listing_card_html(lst: dict[str, Any], market_avg: float | None) -> str:
     price = lst.get("price")
     trim = lst.get("trim") or ""
     year = lst.get("year") or ""
+    make = lst.get("make") or ""
     model = lst.get("model") or "Wrangler 4xe"
 
     pct_str = ""
@@ -184,7 +185,7 @@ def _listing_card_html(lst: dict[str, Any], market_avg: float | None) -> str:
 
     # Winter penalty note
     winter_penalty = ""
-    if is_winter_penalized_trim(trim):
+    if is_winter_penalized_trim(model, trim):
         winter_penalty = "<tr><td style='padding:4px 0;color:#c00'><strong>⚠️ Mud-terrain tires</strong> — less suitable for winter pavement driving</td></tr>"
 
     # Score breakdown pills
@@ -214,7 +215,7 @@ def _listing_card_html(lst: dict[str, Any], market_avg: float | None) -> str:
     [{score:.0f}/100] {_score_label(score)}
   </div>
   {f'<div style="margin-bottom:10px;line-height:1.8">{breakdown_pills}</div>' if breakdown_pills else ""}
-  <div style="font-size:18px;font-weight:bold;margin-bottom:12px">{year} Jeep {model} {trim}</div>
+  <div style="font-size:18px;font-weight:bold;margin-bottom:12px">{year} {make} {model} {trim}</div>
   <table style="font-size:14px;border-collapse:collapse;width:100%">
     <tr><td style="padding:4px 0;color:#666;width:130px">Price</td><td style="padding:4px 0"><strong>{_format_price(price)}</strong>{pct_str}</td></tr>
     <tr><td style="padding:4px 0;color:#666">Mileage</td><td style="padding:4px 0">{lst.get("mileage") or "N/A":,} miles</td></tr>
@@ -241,6 +242,7 @@ def send_instant_alerts(listings: list[dict[str, Any]], market_avgs: dict) -> in
     for lst in listings:
         trim = lst.get("trim") or ""
         year = lst.get("year") or ""
+        make = lst.get("make") or ""
         model = lst.get("model") or ""
         price = lst.get("price")
         score = lst.get("composite_score") or 0
@@ -252,7 +254,7 @@ def send_instant_alerts(listings: list[dict[str, Any]], market_avgs: dict) -> in
             pct_below = f" ({abs(pct):.0f}% below market)"
 
         cwg = " + Cold Weather Group" if lst.get("cold_weather_group") else ""
-        subject = f"🚨 Great Deal: {year} Jeep {model} {trim} — {_format_price(price)}{pct_below}{cwg}"
+        subject = f"🚨 Great Deal: {year} {make} {model} {trim} — {_format_price(price)}{pct_below}{cwg}"
 
         body = f"""
 <html><body style="font-family:sans-serif;max-width:640px;margin:0 auto">
@@ -261,7 +263,7 @@ def send_instant_alerts(listings: list[dict[str, Any]], market_avgs: dict) -> in
   {_listing_card_html(lst, market_avg)}
   <hr style="margin:24px 0">
   <p style="font-size:13px;color:#555;background:#fffbe6;padding:12px;border-radius:4px">{REGEN_NOTE}</p>
-  <p style="font-size:11px;color:#999;margin-top:24px">Jeep 4xe Tracker · ZIP {SEARCH_ZIP} · {SEARCH_RADIUS_MILES} mi radius · Score: {score:.0f}/100</p>
+  <p style="font-size:11px;color:#999;margin-top:24px">PHEV/4xe Deal Tracker · ZIP {SEARCH_ZIP} · {SEARCH_RADIUS_MILES} mi radius · Score: {score:.0f}/100</p>
 </body></html>"""
 
         if _send_email(subject, body):
@@ -279,36 +281,40 @@ def send_daily_digest(
 ) -> bool:
     today = datetime.now(timezone.utc).strftime("%b %d, %Y")
     n = len(good_deals)
-    subject = f"🛻 Jeep 4xe Digest — {today} — {n} deal{'s' if n != 1 else ''} worth seeing"
+    subject = f"🔌 PHEV/4xe Digest — {today} — {n} deal{'s' if n != 1 else ''} worth seeing"
 
     # Market snapshot
     avg_rows = ""
-    for trim, avg in sorted(snapshot.get("avg_by_trim", {}).items()):
-        avg_rows += f"<tr><td style='padding:3px 8px'>{trim}</td><td style='padding:3px 8px'>{_format_price(int(avg))}</td></tr>"
+    for (model, trim), avg in sorted(snapshot.get("avg_by_model_trim", {}).items()):
+        avg_rows += f"<tr><td style='padding:3px 8px'>{model} {trim}</td><td style='padding:3px 8px'>{_format_price(int(avg))}</td></tr>"
 
     price_trend_rows = ""
     from tracker.store import get_price_trend
     trend = get_price_trend(7)
-    for trim, data in sorted(trend.items()):
+    for (model, trim), data in sorted(trend.items()):
         t = data.get("today")
         old = data.get("7d_ago")
         if t and old:
             diff = t - old
             arrow = "⬆️" if diff > 200 else ("⬇️" if diff < -200 else "➡️")
-            price_trend_rows += f"<tr><td style='padding:3px 8px'>{trim}</td><td style='padding:3px 8px'>{arrow} {_format_price(int(abs(diff)))} {'up' if diff > 0 else 'down'} vs. 7d ago</td></tr>"
+            price_trend_rows += f"<tr><td style='padding:3px 8px'>{model} {trim}</td><td style='padding:3px 8px'>{arrow} {_format_price(int(abs(diff)))} {'up' if diff > 0 else 'down'} vs. 7d ago</td></tr>"
 
     source_status_html = " · ".join(
         f"{'✅' if ok else '❌'} {src}" for src, ok in source_status.items()
     )
 
+    lowest_rows = ""
+    for model, price in sorted(snapshot.get("lowest_by_model", {}).items()):
+        lowest_rows += f"<li>{model}: <strong>{_format_price(price)}</strong></li>"
+
     snapshot_html = f"""
 <div style="background:#f0f4ff;border:1px solid #c0d0f0;border-radius:6px;padding:16px;margin-bottom:24px">
   <h3 style="margin-top:0">📊 Market Snapshot</h3>
-  <p>Total active 4xe listings ({SEARCH_RADIUS_MILES} mi): <strong>{snapshot.get("total", 0)}</strong></p>
+  <p>Total active tracked listings ({SEARCH_RADIUS_MILES} mi): <strong>{snapshot.get("total", 0)}</strong></p>
   <p>Clean CARFAX (no accidents + 1 owner): <strong>{snapshot.get("great_good_deal_count", 0)}</strong></p>
-  {f"<p>Lowest Sahara / High Altitude today: <strong>{_format_price(snapshot.get('lowest_sahara_high_altitude'))}</strong></p>" if snapshot.get("lowest_sahara_high_altitude") else ""}
+  {f"<p>Lowest price by model today:</p><ul>{lowest_rows}</ul>" if lowest_rows else ""}
   <table style="font-size:13px;border-collapse:collapse">
-    <tr><th style="padding:3px 8px;text-align:left">Trim</th><th style="padding:3px 8px;text-align:left">Avg price</th></tr>
+    <tr><th style="padding:3px 8px;text-align:left">Model / trim</th><th style="padding:3px 8px;text-align:left">Avg price</th></tr>
     {avg_rows}
   </table>
   {f'<table style="font-size:13px;border-collapse:collapse;margin-top:8px">{price_trend_rows}</table>' if price_trend_rows else ""}
@@ -324,11 +330,11 @@ def send_daily_digest(
 
     no_deals_msg = ""
     if not good_deals:
-        no_deals_msg = "<p style='color:#888'>No listings scored ≥ 65 this run. Check back next time.</p>"
+        no_deals_msg = f"<p style='color:#888'>No listings scored ≥ {SCORE_DAILY_DIGEST} this run. Check back next time.</p>"
 
     body = f"""
 <html><body style="font-family:sans-serif;max-width:640px;margin:0 auto;padding:20px">
-  <h1 style="font-size:22px">🛻 Jeep 4xe Deal Digest</h1>
+  <h1 style="font-size:22px">🔌 PHEV/4xe Deal Digest</h1>
   <p style="color:#666">{today} · ZIP {SEARCH_ZIP} · {SEARCH_RADIUS_MILES} mi radius · {stats.get("new", 0)} new listings · {stats.get("price_drops", 0)} price drops</p>
   {snapshot_html}
   <h2>Deals worth seeing ({n})</h2>
@@ -336,9 +342,12 @@ def send_daily_digest(
   {no_deals_msg}
   <hr style="margin:24px 0">
   <p style="font-size:13px;color:#555;background:#fffbe6;padding:12px;border-radius:4px">{REGEN_NOTE}</p>
-  <h3 style="margin-top:24px">Trim guide — winter daily driver scoring</h3>
+  <h3 style="margin-top:24px">Jeep 4xe trim guide — winter daily driver scoring</h3>
+  <p style="font-size:12px;color:#777">The Outlander PHEV, Tucson PHEV, and RAV4 Prime ship AWD standard on every
+  trim, so their trim scoring is a lighter nudge (wheel size, standard heated packages) rather than
+  this dedicated table — see <code>scorer.py</code> for those weights.</p>
   {TRIM_GUIDE_HTML}
-  <p style="font-size:11px;color:#999;margin-top:24px">Jeep 4xe Tracker · Runs 3× daily · Scores calibrated for teen driver, Chicago winter conditions</p>
+  <p style="font-size:11px;color:#999;margin-top:24px">PHEV/4xe Deal Tracker · Runs 3× daily · Scores calibrated for teen driver, Chicago winter conditions</p>
 </body></html>"""
 
     return _send_email(subject, body)
