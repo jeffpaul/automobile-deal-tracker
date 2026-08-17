@@ -85,7 +85,7 @@ python -m tracker.main
 1. Push to GitHub
 2. Go to **Settings → Secrets and variables → Actions**
 3. Add all variables from `.env.example` as repository secrets
-4. The workflow runs automatically at **8am Central time** daily
+4. The workflow runs automatically at **6am Central time** daily
 
 ## Architecture
 

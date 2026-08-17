@@ -2,8 +2,8 @@ name: PHEV/4xe tracker
 
 on:
   schedule:
-    # 8am Central (CDT = UTC-5; CST = UTC-6 → 7am CST)
-    - cron: '0 13 * * *'
+    # 6am Central (CDT = UTC-5; CST = UTC-6 → 5am CST) — ready before the day starts
+    - cron: '0 11 * * *'
   workflow_dispatch:
 
 jobs:
