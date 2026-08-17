@@ -99,6 +99,33 @@ across all tracked vehicles, which is below the expected minimum of 10.</p>
     return _send_email("⚠️ PHEV/4xe Deal Tracker: Low inventory warning", body)
 
 
+def send_vehicle_anomaly_warning(anomalies: list[dict]) -> bool:
+    """Warn when one specific vehicle's MarketCheck count drops to 0 despite a
+    healthy recent average — the aggregate low-inventory check above can miss
+    this since the other tracked vehicles can mask a single one going to 0."""
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    rows = "".join(
+        f"<li><strong>{a['vehicle']}</strong>: 0 listings this run "
+        f"(recent {a['lookback']}-run average: {a['baseline']:.1f})</li>"
+        for a in anomalies
+    )
+    body = f"""
+<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+<h2 style="color:#cc0000">⚠️ PHEV/4xe Deal Tracker — Vehicle Anomaly Warning</h2>
+<p>The tracker run at <strong>{ts}</strong> found <strong>0 MarketCheck listings</strong> for the
+following vehicle(s), despite a healthy recent average:</p>
+<ul>{rows}</ul>
+<p>This is the same class of issue previously found with Grand Cherokee 4xe, Tucson PHEV, and
+RAV4 Prime — a model/powertrain query silently stopped matching. Worth re-verifying the
+<code>mc_model</code> / <code>mc_powertrain_type</code> for the affected vehicle(s) in
+<code>tracker/config.py</code> against the live MarketCheck API.</p>
+<p style="color:#666;font-size:12px">The run continued normally for all other vehicles — this is
+informational, not a failure.</p>
+</body></html>
+"""
+    return _send_email("⚠️ PHEV/4xe Deal Tracker: Vehicle anomaly warning", body)
+
+
 def _format_price(price: int | None) -> str:
     if price is None:
         return "N/A"

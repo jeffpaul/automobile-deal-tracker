@@ -1,6 +1,7 @@
 """MarketCheck API — primary inventory source."""
 
 import logging
+import time
 from typing import Any
 
 import requests
@@ -16,9 +17,15 @@ BASE_URL = "https://mc-api.marketcheck.com/v2/search/car/active"
 PAGE_SIZE = 100
 MAX_ROWS = 1500
 
+# Paces requests comfortably under the 5 calls/second cap. Without this, back
+# to back page/vehicle requests reliably trip 429s that then get absorbed by
+# the retry decorator below — harmless, but noisy in the logs every run.
+REQUEST_DELAY_SECONDS = 0.3
+
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def _fetch_page(make: str, model: str, powertrain_type: str | None, year_min: int, year_max: int, start: int) -> dict:
+    time.sleep(REQUEST_DELAY_SECONDS)
     params = {
         "api_key": MARKETCHECK_API_KEY,
         "make": make,

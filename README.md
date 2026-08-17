@@ -48,6 +48,8 @@ Calibrated for a teen driver in Chicago winter conditions — **not** off-road c
 
 ### 1. Clone and install
 
+Requires **Python 3.12+** (matches the version pinned in `.github/workflows/tracker.yml`).
+
 ```bash
 git clone https://github.com/YOUR_USERNAME/automobile-deal-tracker
 cd automobile-deal-tracker

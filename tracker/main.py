@@ -5,7 +5,12 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
-from tracker.alerts import send_daily_digest, send_instant_alerts, send_low_inventory_warning
+from tracker.alerts import (
+    send_daily_digest,
+    send_instant_alerts,
+    send_low_inventory_warning,
+    send_vehicle_anomaly_warning,
+)
 from tracker.config import SCORE_DAILY_DIGEST, SCORE_INSTANT_ALERT
 from tracker.scorer import compute_market_averages, score_listing
 from tracker.sources.carfax import fetch_carfax
@@ -14,12 +19,35 @@ from tracker.store import (
     get_alerted_vins,
     get_market_snapshot,
     get_stored_market_averages,
+    get_vehicle_count_history,
     init_db,
     log_run,
     mark_alerted,
     merge_listings,
     upsert_listings,
 )
+
+# A vehicle needs at least this average count over the lookback window before
+# a 0 this run counts as an anomaly — avoids flagging vehicles that are
+# legitimately, consistently thin on inventory (e.g. Outlander PHEV).
+VEHICLE_ANOMALY_MIN_BASELINE = 3
+VEHICLE_ANOMALY_LOOKBACK_RUNS = 7
+
+
+def _detect_vehicle_anomalies(current_counts: dict[str, int]) -> list[dict]:
+    history = get_vehicle_count_history(VEHICLE_ANOMALY_LOOKBACK_RUNS)
+    anomalies = []
+    for vehicle, past_counts in history.items():
+        if not past_counts:
+            continue
+        baseline = sum(past_counts) / len(past_counts)
+        if baseline >= VEHICLE_ANOMALY_MIN_BASELINE and current_counts.get(vehicle, 0) == 0:
+            anomalies.append({
+                "vehicle": vehicle,
+                "baseline": baseline,
+                "lookback": len(past_counts),
+            })
+    return anomalies
 
 logging.basicConfig(
     level=logging.INFO,
@@ -63,6 +91,22 @@ def main() -> None:
     merged = merge_listings(all_listings)
     logger.info("After deduplication: %d unique VINs", len(merged))
 
+    # Per-vehicle MarketCheck counts, for both the anomaly check below and the
+    # history this check compares future runs against.
+    vehicle_counts: dict[str, int] = {}
+    for l in all_listings:
+        if l.get("source") == "marketcheck":
+            key = f"{l.get('make', '')} {l.get('model', '')}"
+            vehicle_counts[key] = vehicle_counts.get(key, 0) + 1
+
+    # Catches a single vehicle silently dropping to 0 (e.g. an MC model/
+    # powertrain query breaking) even when the other tracked vehicles keep the
+    # aggregate count healthy enough to pass the check below.
+    anomalies = _detect_vehicle_anomalies(vehicle_counts)
+    if anomalies:
+        logger.warning("Vehicle count anomalies detected: %s", anomalies)
+        send_vehicle_anomaly_warning(anomalies)
+
     # Sanity check: MarketCheck should return ≥10 listings under normal conditions.
     # Fewer usually means quota exhaustion or an API outage — warn and bail out.
     mc_count = sum(1 for l in all_listings if l.get("source") == "marketcheck")
@@ -70,7 +114,7 @@ def main() -> None:
         logger.warning("Low MarketCheck count (%d) — sending warning email", mc_count)
         send_low_inventory_warning(mc_count, errors)
         log_run({"total": len(merged), "new": 0, "price_drops": 0, "alerts_sent": 0},
-                source_status, errors)
+                source_status, errors, vehicle_counts)
         return
 
     # First scoring pass — price/trim/mileage/DOM signals only (no history yet)
@@ -114,7 +158,7 @@ def main() -> None:
     if digest_sent:
         logger.info("Daily digest sent with %d deals", len(good_deals))
 
-    log_run(stats, source_status, errors)
+    log_run(stats, source_status, errors, vehicle_counts)
 
     logger.info(
         "Done. %d listings, %d new, %d price drops, %d alerts sent.",

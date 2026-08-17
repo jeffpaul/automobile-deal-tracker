@@ -57,7 +57,8 @@ CREATE TABLE IF NOT EXISTS runs (
     price_drops     INTEGER,
     alerts_sent     INTEGER,
     sources_ok      TEXT,
-    errors          TEXT
+    errors          TEXT,
+    vehicle_counts  TEXT
 );
 """
 
@@ -84,6 +85,10 @@ def init_db() -> None:
             conn.execute(f"ALTER TABLE listings ADD COLUMN {col} {typedef}")
         except sqlite3.OperationalError:
             pass  # Column already exists
+    try:
+        conn.execute("ALTER TABLE runs ADD COLUMN vehicle_counts TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
     conn.commit()
     conn.close()
 
@@ -359,12 +364,17 @@ def get_price_trend(days: int = 7) -> dict[tuple, dict[str, float | None]]:
     return trend
 
 
-def log_run(stats: dict, source_status: dict, errors: list[str] | None = None) -> None:
+def log_run(
+    stats: dict,
+    source_status: dict,
+    errors: list[str] | None = None,
+    vehicle_counts: dict[str, int] | None = None,
+) -> None:
     conn = _get_conn()
     now = datetime.now(timezone.utc).isoformat()
     conn.execute(
-        """INSERT INTO runs (run_at, listings_found, new_listings, price_drops, alerts_sent, sources_ok, errors)
-           VALUES (?,?,?,?,?,?,?)""",
+        """INSERT INTO runs (run_at, listings_found, new_listings, price_drops, alerts_sent, sources_ok, errors, vehicle_counts)
+           VALUES (?,?,?,?,?,?,?,?)""",
         (
             now,
             stats.get("total", 0),
@@ -373,10 +383,33 @@ def log_run(stats: dict, source_status: dict, errors: list[str] | None = None) -
             stats.get("alerts_sent", 0),
             json.dumps(source_status),
             json.dumps(errors or []),
+            json.dumps(vehicle_counts or {}),
         ),
     )
     conn.commit()
     conn.close()
+
+
+def get_vehicle_count_history(lookback: int = 7) -> dict[str, list[int]]:
+    """Return recent per-vehicle MarketCheck counts (most recent first), keyed
+    by "Make Model", for anomaly detection against the current run's counts."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT vehicle_counts FROM runs WHERE vehicle_counts IS NOT NULL AND vehicle_counts != '' "
+        "ORDER BY id DESC LIMIT ?",
+        (lookback,),
+    ).fetchall()
+    conn.close()
+
+    history: dict[str, list[int]] = {}
+    for row in rows:
+        try:
+            counts = json.loads(row["vehicle_counts"] or "{}")
+        except Exception:
+            continue
+        for key, count in counts.items():
+            history.setdefault(key, []).append(count)
+    return history
 
 
 def get_stored_market_averages() -> dict[tuple, float]:
