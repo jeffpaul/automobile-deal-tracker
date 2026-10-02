@@ -23,5 +23,11 @@
     "one_owner": 1,
     "service_record_count": 9,
     "report": "CARFAX 2026-10-01: no accidents, 1 owner (personal lease, MD), no open recalls, Jeep Certified Pre-Owned (7yr/100k powertrain)"
+  },
+  "1C4RJXP67RW154917": {
+    "no_accidents": 1,
+    "one_owner": 1,
+    "service_record_count": 9,
+    "report": "CARFAX 2026-10-01: no accidents, 1 owner but RENTAL fleet (VA/NC/CT), oil changes ~20k mi apart, no Jeep dealer service, battery replaced 05/2026 (no-start)"
   }
 }
