@@ -41,5 +41,11 @@
     "one_owner": 1,
     "service_record_count": 2,
     "report": "CARFAX 2026-10-01: no accidents, 1 owner (personal lease, CT), only 1 oil change reported (3,516 mi), open recalls 25V-766 + 26V-363, sold at auction 09/2026"
+  },
+  "1C4RJXN65RW152716": {
+    "no_accidents": 1,
+    "one_owner": 1,
+    "service_record_count": 3,
+    "report": "AutoCheck 2026-10-01: score 86 (below 90-95 range), MANUFACTURER BUYBACK/LEMON announced at auction 09/2026, 1 owner (lease, CA), battery replaced + recall 08/2026"
   }
 }
