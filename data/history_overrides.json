@@ -17,5 +17,11 @@
     "one_owner": 0,
     "service_record_count": 16,
     "report": "CARFAX 2026-10-01: accidents 04/2024 + 02/2025, minor damage 03/2026, 2 owners, open recall 25V-741 HV battery fire"
+  },
+  "1C4RJXP67RW145991": {
+    "no_accidents": 1,
+    "one_owner": 1,
+    "service_record_count": 9,
+    "report": "CARFAX 2026-10-01: no accidents, 1 owner (personal lease, MD), no open recalls, Jeep Certified Pre-Owned (7yr/100k powertrain)"
   }
 }
