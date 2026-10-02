@@ -1,0 +1,51 @@
+{
+  "_comment": "Manually verified vehicle history, keyed by VIN. Applied on every run after source merge and authoritative over MarketCheck/CARFAX-scraper signals. Add an entry after reading a dealer-provided CARFAX/AutoCheck report.",
+  "1C4JJXP62PW583456": {
+    "no_accidents": 1,
+    "one_owner": 1,
+    "service_record_count": 10,
+    "report": "CARFAX 2026-10-01: no accidents, 1 owner (personal lease, IL), no open recalls"
+  },
+  "1C4JJXP67PW604351": {
+    "no_accidents": 1,
+    "one_owner": 1,
+    "service_record_count": 16,
+    "report": "AutoCheck 2026-08-16: score 94, no accidents, 1 owner (lease, MI), open recall 26V-363 power steering"
+  },
+  "1C4JJXP64PW553469": {
+    "no_accidents": 0,
+    "one_owner": 0,
+    "service_record_count": 16,
+    "report": "CARFAX 2026-10-01: accidents 04/2024 + 02/2025, minor damage 03/2026, 2 owners, open recall 25V-741 HV battery fire"
+  },
+  "1C4RJXP67RW145991": {
+    "no_accidents": 1,
+    "one_owner": 1,
+    "service_record_count": 9,
+    "report": "CARFAX 2026-10-01: no accidents, 1 owner (personal lease, MD), no open recalls, Jeep Certified Pre-Owned (7yr/100k powertrain)"
+  },
+  "1C4RJXP67RW154917": {
+    "no_accidents": 1,
+    "one_owner": 1,
+    "service_record_count": 9,
+    "report": "CARFAX 2026-10-01: no accidents, 1 owner but RENTAL fleet (VA/NC/CT), oil changes ~20k mi apart, no Jeep dealer service, battery replaced 05/2026 (no-start)"
+  },
+  "1C4RJXP6XRW232087": {
+    "no_accidents": 1,
+    "one_owner": 1,
+    "service_record_count": 4,
+    "report": "CARFAX 2026-10-01: no accidents, 1 owner but RENTAL fleet (FL), engine replaced at 14,695 mi (09/2024), no oil change reported 16.5k-43.9k mi"
+  },
+  "1C4RJXN64RW146275": {
+    "no_accidents": 1,
+    "one_owner": 1,
+    "service_record_count": 2,
+    "report": "CARFAX 2026-10-01: no accidents, 1 owner (personal lease, CT), only 1 oil change reported (3,516 mi), open recalls 25V-766 + 26V-363, sold at auction 09/2026"
+  },
+  "1C4RJXN65RW152716": {
+    "no_accidents": 1,
+    "one_owner": 1,
+    "service_record_count": 3,
+    "report": "AutoCheck 2026-10-01: score 86 (below 90-95 range), MANUFACTURER BUYBACK/LEMON announced at auction 09/2026, 1 owner (lease, CA), battery replaced + recall 08/2026"
+  }
+}

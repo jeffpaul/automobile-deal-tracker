@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from tracker.config import DB_PATH
+from tracker.config import DB_PATH, HISTORY_OVERRIDES_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +101,27 @@ def _coalesce(*values):
     return None
 
 
+HISTORY_OVERRIDE_FIELDS = ("no_accidents", "one_owner", "service_record_count", "carfax_badge")
+
+
+def load_history_overrides() -> dict[str, dict]:
+    """VIN -> verified history fields from data/history_overrides.json.
+
+    MarketCheck's embedded CARFAX flags can be wrong (a listing flagged
+    1-owner turned out to have 2 owners and 3 damage events), so a full
+    report read by hand wins over any source signal.
+    """
+    try:
+        with open(HISTORY_OVERRIDES_PATH) as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except (OSError, json.JSONDecodeError) as e:
+        logger.error("Could not read history overrides: %s", e)
+        return {}
+    return {vin: v for vin, v in data.items() if not vin.startswith("_") and isinstance(v, dict)}
+
+
 def merge_listings(raw_listings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Deduplicate by VIN. Multiple source records for the same VIN are merged
@@ -168,9 +189,13 @@ def merge_listings(raw_listings: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 existing["pricing_type"] = "no-haggle"
 
     # Finalize source list
+    overrides = load_history_overrides()
     results = []
     for vin, merged in by_vin.items():
         merged["sources"] = json.dumps(sorted(set(merged.pop("_sources", []))))
+        for f in HISTORY_OVERRIDE_FIELDS:
+            if f in overrides.get(vin, {}):
+                merged[f] = overrides[vin][f]
         results.append(merged)
 
     return results

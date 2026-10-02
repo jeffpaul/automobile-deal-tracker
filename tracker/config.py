@@ -106,6 +106,10 @@ VEHICLES = [
 # DB
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "listings.db")
 
+# Manually verified history (from dealer-provided CARFAX/AutoCheck reports),
+# keyed by VIN — overrides source signals on every run. See store.py.
+HISTORY_OVERRIDES_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "history_overrides.json")
+
 # Alert thresholds
 SCORE_INSTANT_ALERT = 65
 SCORE_DAILY_DIGEST = 45
