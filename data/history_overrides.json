@@ -29,5 +29,11 @@
     "one_owner": 1,
     "service_record_count": 9,
     "report": "CARFAX 2026-10-01: no accidents, 1 owner but RENTAL fleet (VA/NC/CT), oil changes ~20k mi apart, no Jeep dealer service, battery replaced 05/2026 (no-start)"
+  },
+  "1C4RJXP6XRW232087": {
+    "no_accidents": 1,
+    "one_owner": 1,
+    "service_record_count": 4,
+    "report": "CARFAX 2026-10-01: no accidents, 1 owner but RENTAL fleet (FL), engine replaced at 14,695 mi (09/2024), no oil change reported 16.5k-43.9k mi"
   }
 }
