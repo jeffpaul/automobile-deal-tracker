@@ -439,16 +439,13 @@ def get_vehicle_count_history(lookback: int = 7) -> dict[str, list[int]]:
 
 def get_stored_market_averages() -> dict[tuple, float]:
     """Pull market averages from all listings currently in the DB."""
-    from collections import defaultdict
+    from tracker.scorer import compute_market_averages
     conn = _get_conn()
     rows = conn.execute(
-        "SELECT model, trim, price FROM listings WHERE price IS NOT NULL AND price > 5000"
+        "SELECT model, trim, year, price FROM listings WHERE price IS NOT NULL AND price > 5000"
     ).fetchall()
     conn.close()
-    buckets: dict[tuple, list[int]] = defaultdict(list)
-    for r in rows:
-        buckets[(r["model"], r["trim"])].append(r["price"])
-    return {k: sum(v) / len(v) for k, v in buckets.items() if v}
+    return compute_market_averages([dict(r) for r in rows])
 
 
 def get_market_snapshot() -> dict:

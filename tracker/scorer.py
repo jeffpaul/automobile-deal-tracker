@@ -368,18 +368,48 @@ def score_breakdown(listing: dict[str, Any], market_avg_for_trim: float | None) 
     return components
 
 
+# A market average built from fewer listings than this is mostly the car's own
+# price (with n=1 it IS the car's own price, so the price component scores 0),
+# so the lookup falls back to a wider grouping instead.
+MARKET_AVG_MIN_SAMPLES = 5
+
+
+def _market_avg_keys(model: str, trim: str, year: Any) -> list[tuple]:
+    """Lookup order for a listing's market average, narrowest first.
+
+    Trim+year is the true comparable; pooling years (the old (model, trim)
+    key) made newer model years look overpriced and older ones look like
+    deals. Trim across years comes before model+year because the trim gap
+    (e.g. Sport S vs. Rubicon X) is usually wider than the year gap.
+    """
+    return [(model, trim, year), (model, trim), (model, year), (model,)]
+
+
 def compute_market_averages(listings: list[dict]) -> dict[tuple, float]:
-    """Compute mean price by (model, trim) for use in price scoring."""
+    """Mean price per grouping in _market_avg_keys, for use in price scoring.
+
+    Only groupings with at least MARKET_AVG_MIN_SAMPLES listings are kept,
+    except the model-wide one, which needs 2 (it's the last resort for thin
+    vehicles like Tucson PHEV; a single listing would just be its own price).
+    """
     from collections import defaultdict
     buckets: dict[tuple, list[int]] = defaultdict(list)
     for lst in listings:
         price = lst.get("price") or 0
         if price > 5000:  # Sanity filter
-            key = (lst.get("model", ""), lst.get("trim", ""))
-            buckets[key].append(price)
+            for key in _market_avg_keys(lst.get("model", ""), lst.get("trim", ""), lst.get("year")):
+                buckets[key].append(price)
 
     return {
         key: sum(prices) / len(prices)
         for key, prices in buckets.items()
-        if prices
+        if len(prices) >= (2 if len(key) == 1 else MARKET_AVG_MIN_SAMPLES)
     }
+
+
+def market_avg_for(listing: dict[str, Any], market_avgs: dict[tuple, float]) -> float | None:
+    """The narrowest market average available for this listing, or None."""
+    for key in _market_avg_keys(listing.get("model", ""), listing.get("trim", ""), listing.get("year")):
+        if key in market_avgs:
+            return market_avgs[key]
+    return None

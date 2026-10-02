@@ -12,7 +12,7 @@ from tracker.alerts import (
     send_vehicle_anomaly_warning,
 )
 from tracker.config import SCORE_DAILY_DIGEST, SCORE_INSTANT_ALERT
-from tracker.scorer import compute_market_averages, score_listing
+from tracker.scorer import compute_market_averages, market_avg_for, score_listing
 from tracker.sources.carfax import fetch_carfax
 from tracker.sources.marketcheck import fetch_marketcheck
 from tracker.store import (
@@ -128,8 +128,7 @@ def main() -> None:
                 market_avgs[k] = v
 
     for listing in merged:
-        avg_key = (listing.get("model", ""), listing.get("trim", ""))
-        listing["composite_score"] = score_listing(listing, market_avgs.get(avg_key))
+        listing["composite_score"] = score_listing(listing, market_avg_for(listing, market_avgs))
 
     stats = upsert_listings(merged)
     already_alerted = get_alerted_vins()

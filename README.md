@@ -26,7 +26,7 @@ Calibrated for a teen driver in Chicago winter conditions — **not** off-road c
 
 | Component | Max pts | Signal |
 |-----------|---------|--------|
-| Price vs. market average | 35 | How far below the average price for this model/trim |
+| Price vs. market average | 35 | How far below the average price for this model/trim/year (falls back to model/trim, then model/year, then model when fewer than 5 comparable listings) |
 | Price vs. MC reference price | 15 | MarketCheck's per-car market value estimate |
 | CARFAX history | 15 | No accidents (+8), 1 owner (+4), Great Value badge (+3) |
 | Trim | 12 | Winter-favorable trims preferred (see Scoring rationale above) |

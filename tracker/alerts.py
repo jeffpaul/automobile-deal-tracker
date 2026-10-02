@@ -17,7 +17,7 @@ from tracker.config import (
     SMTP_PASSWORD,
 )
 from tracker.config import SEARCH_ZIP, SEARCH_RADIUS_MILES, SCORE_DAILY_DIGEST
-from tracker.scorer import is_winter_penalized_trim, score_breakdown
+from tracker.scorer import is_winter_penalized_trim, market_avg_for, score_breakdown
 
 logger = logging.getLogger(__name__)
 
@@ -274,7 +274,7 @@ def send_instant_alerts(listings: list[dict[str, Any]], market_avgs: dict) -> in
         price = lst.get("price")
         score = lst.get("composite_score") or 0
 
-        market_avg = market_avgs.get((lst.get("model", ""), lst.get("trim", "")))
+        market_avg = market_avg_for(lst, market_avgs)
         pct_below = ""
         if market_avg and price:
             pct = (market_avg - price) / market_avg * 100
@@ -352,7 +352,7 @@ def send_daily_digest(
     cards_html = ""
     sorted_deals = sorted(good_deals, key=lambda l: l.get("composite_score") or 0, reverse=True)
     for lst in sorted_deals:
-        market_avg = market_avgs.get((lst.get("model", ""), lst.get("trim", "")))
+        market_avg = market_avg_for(lst, market_avgs)
         cards_html += _listing_card_html(lst, market_avg)
 
     no_deals_msg = ""
