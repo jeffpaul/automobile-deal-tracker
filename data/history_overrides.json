@@ -1,0 +1,21 @@
+{
+  "_comment": "Manually verified vehicle history, keyed by VIN. Applied on every run after source merge and authoritative over MarketCheck/CARFAX-scraper signals. Add an entry after reading a dealer-provided CARFAX/AutoCheck report.",
+  "1C4JJXP62PW583456": {
+    "no_accidents": 1,
+    "one_owner": 1,
+    "service_record_count": 10,
+    "report": "CARFAX 2026-10-01: no accidents, 1 owner (personal lease, IL), no open recalls"
+  },
+  "1C4JJXP67PW604351": {
+    "no_accidents": 1,
+    "one_owner": 1,
+    "service_record_count": 16,
+    "report": "AutoCheck 2026-08-16: score 94, no accidents, 1 owner (lease, MI), open recall 26V-363 power steering"
+  },
+  "1C4JJXP64PW553469": {
+    "no_accidents": 0,
+    "one_owner": 0,
+    "service_record_count": 16,
+    "report": "CARFAX 2026-10-01: accidents 04/2024 + 02/2025, minor damage 03/2026, 2 owners, open recall 25V-741 HV battery fire"
+  }
+}
