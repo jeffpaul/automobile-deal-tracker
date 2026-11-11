@@ -7,15 +7,23 @@ from typing import Any
 import requests
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from tracker.config import MARKETCHECK_API_KEY, SEARCH_ZIP, SEARCH_RADIUS_MILES, VEHICLES
+from tracker.config import (
+    MARKETCHECK_API_KEY,
+    MC_MAX_MILES,
+    MC_MAX_ROWS,
+    MC_MIN_PRICE,
+    NO_HAGGLE_DEALERS,
+    SEARCH_RADIUS_MILES,
+    SEARCH_ZIP,
+    VEHICLES,
+)
 
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://mc-api.marketcheck.com/v2/search/car/active"
 
-# Basic plan: 1500 row pagination limit, 5 calls/second
+# 5 calls/second on both Free and Basic; the row cap per query is MC_MAX_ROWS
 PAGE_SIZE = 100
-MAX_ROWS = 1500
 
 # Paces requests comfortably under the 5 calls/second cap. Without this, back
 # to back page/vehicle requests reliably trip 429s that then get absorbed by
@@ -24,7 +32,7 @@ REQUEST_DELAY_SECONDS = 0.3
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-def _fetch_page(make: str, model: str, powertrain_type: str | None, year_min: int, year_max: int, start: int) -> dict:
+def _fetch_page(make: str, model: str, powertrain_type: str | None, years: list[int], start: int) -> dict:
     time.sleep(REQUEST_DELAY_SECONDS)
     params = {
         "api_key": MARKETCHECK_API_KEY,
@@ -32,10 +40,11 @@ def _fetch_page(make: str, model: str, powertrain_type: str | None, year_min: in
         "model": model,
         "zip": SEARCH_ZIP,
         "radius": SEARCH_RADIUS_MILES,
-        "year": ",".join(str(y) for y in range(year_min, year_max + 1)),
+        "year": ",".join(str(y) for y in years),
+        "miles_range": f"0-{MC_MAX_MILES}",
+        "price_range": f"{MC_MIN_PRICE}-1000000",
         "rows": PAGE_SIZE,
         "start": start,
-        "include_relevant_links": "true",
     }
     if powertrain_type:
         # Server-side filter — several tracked models (Grand Cherokee 4xe,
@@ -67,11 +76,18 @@ def _normalize(raw: dict, make: str, model_label: str) -> dict:
     except (TypeError, ValueError):
         dealer_rating = None
 
-    # CARFAX signals embedded directly in every MC search result
+    # CARFAX signals embedded directly in every MC search result. A clean
+    # title only means no salvage/rebuilt/lemon brand — it says nothing about
+    # accidents, so it's kept separate. no_accidents stays unknown (None)
+    # unless CARFAX or a hand-verified override in history_overrides.json
+    # supplies it.
     carfax_1_owner = listing.get("carfax_1_owner")
     carfax_clean_title = listing.get("carfax_clean_title")
-    no_accidents = int(bool(carfax_clean_title)) if carfax_clean_title is not None else None
+    clean_title = int(bool(carfax_clean_title)) if carfax_clean_title is not None else None
     one_owner = int(bool(carfax_1_owner)) if carfax_1_owner is not None else None
+
+    dealer_name = dealer.get("name", "") if isinstance(dealer, dict) else ""
+    no_haggle = any(d in dealer_name.lower() for d in NO_HAGGLE_DEALERS)
 
     # Price drop signals
     price_change_pct = listing.get("price_change_percent")
@@ -86,22 +102,57 @@ def _normalize(raw: dict, make: str, model_label: str) -> dict:
         "trim": build.get("trim") or listing.get("trim", ""),
         "price": listing.get("price"),
         "mileage": listing.get("miles"),
-        "city": listing.get("city", ""),
-        "state": listing.get("state", ""),
-        "dealer_name": dealer.get("name", "") if isinstance(dealer, dict) else "",
+        # MC nests location under the dealer object, not the listing
+        "city": listing.get("city") or (dealer.get("city", "") if isinstance(dealer, dict) else ""),
+        "state": listing.get("state") or (dealer.get("state", "") if isinstance(dealer, dict) else ""),
+        "dealer_name": dealer_name,
         "listing_url": listing.get("vdp_url") or listing.get("listing_url", ""),
         "exterior_color": build.get("exterior_color") or listing.get("exterior_color", ""),
         "days_on_market": listing.get("dom_active") or listing.get("dom"),
-        "pricing_type": "negotiable",
+        "pricing_type": "no-haggle" if no_haggle else "negotiable",
         "source_type": "dealer",
         "dealer_rating": dealer_rating,
         "cold_weather_group": cold_weather_group,
         "has_blind_spot_mon": blind_spot,
-        "no_accidents": no_accidents,
+        "no_accidents": None,
+        "clean_title": clean_title,
         "one_owner": one_owner,
         "price_change_percent": price_change_pct,
         "ref_price": ref_price,
     }
+
+
+def _fetch_query(make: str, model_label: str, query: str, powertrain_type: str | None,
+                 years: list[int], bail_if_over_cap: bool = False) -> tuple[list[dict], int]:
+    """Page through one query. Returns (listings, total result count).
+
+    With bail_if_over_cap, stops after the first page when the total exceeds
+    MC_MAX_ROWS, so the caller can split the query without wasting calls.
+    """
+    results: list[dict] = []
+    total = 0
+    start = 0
+    while True:
+        try:
+            data = _fetch_page(make, query, powertrain_type, years, start)
+        except Exception as e:
+            logger.error("MarketCheck page fetch failed for %s %s at start=%d: %s", query, years, start, e)
+            break
+
+        listings = data.get("listings", [])
+        total = data.get("num_found") or data.get("totalCount") or 0
+        if not listings or (bail_if_over_cap and total > MC_MAX_ROWS):
+            break
+
+        for raw in listings:
+            norm = _normalize(raw, make, model_label)
+            if norm["vin"]:
+                results.append(norm)
+
+        start += len(listings)
+        if start >= min(total, MC_MAX_ROWS):
+            break
+    return results, total
 
 
 def fetch_marketcheck() -> list[dict[Any, Any]]:
@@ -116,31 +167,25 @@ def fetch_marketcheck() -> list[dict[Any, Any]]:
         model_label = vehicle["model_label"]
         query = vehicle["mc_model"]
         powertrain_type = vehicle.get("mc_powertrain_type")
-        vehicle_count = 0
-        start = 0
-        while True:
-            try:
-                data = _fetch_page(make, query, powertrain_type, vehicle["year_min"], vehicle["year_max"], start)
-            except Exception as e:
-                logger.error("MarketCheck page fetch failed for %s at start=%d: %s", query, start, e)
-                break
+        years = list(range(vehicle["year_min"], vehicle["year_max"] + 1))
 
-            listings = data.get("listings", [])
-            if not listings:
-                break
+        listings, total = _fetch_query(make, model_label, query, powertrain_type, years,
+                                       bail_if_over_cap=len(years) > 1)
+        if total > MC_MAX_ROWS and len(years) > 1:
+            # More results than the plan's pagination cap — re-query one
+            # model year at a time so the tail isn't silently dropped.
+            logger.info("MarketCheck: %s %s has %d results (> %d cap) — splitting by year",
+                        make, model_label, total, MC_MAX_ROWS)
+            listings = []
+            for year in years:
+                year_listings, year_total = _fetch_query(make, model_label, query, powertrain_type, [year])
+                if year_total > MC_MAX_ROWS:
+                    logger.warning("MarketCheck: %s %s %d still has %d results (> %d cap) — truncated",
+                                   make, model_label, year, year_total, MC_MAX_ROWS)
+                listings.extend(year_listings)
 
-            for raw in listings:
-                norm = _normalize(raw, make, model_label)
-                if norm["vin"]:
-                    results.append(norm)
-                    vehicle_count += 1
-
-            total = data.get("totalCount") or data.get("num_found", 0)
-            start += len(listings)
-            if start >= min(total, MAX_ROWS) or not listings:
-                break
-
-        logger.info("MarketCheck: %s %s -> %d listings", make, model_label, vehicle_count)
+        results.extend(listings)
+        logger.info("MarketCheck: %s %s -> %d listings", make, model_label, len(listings))
 
     logger.info("MarketCheck: fetched %d listings total", len(results))
     return results

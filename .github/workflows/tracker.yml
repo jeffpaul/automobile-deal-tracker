@@ -24,12 +24,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Restore database
-        uses: actions/cache@v4
-        with:
-          path: data/listings.db
-          key: listings-db-${{ github.run_id }}
-          restore-keys: listings-db-
+      # The database lives in git (committed at the end of every run), so the
+      # checkout above already has the latest copy — no Actions cache needed.
 
       - name: Run tracker
         env:
@@ -41,13 +37,12 @@ jobs:
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          # Optional repository variables (Settings → Secrets and variables →
+          # Actions → Variables). Unset = defaults in tracker/config.py.
+          MC_MAX_ROWS: ${{ vars.MC_MAX_ROWS }}        # 500 on MarketCheck's Free plan
+          MC_MAX_MILES: ${{ vars.MC_MAX_MILES }}
+          CARFAX_ENABLED: ${{ vars.CARFAX_ENABLED }}  # "true" to re-enable Apify CARFAX
         run: python -m tracker.main
-
-      - name: Save database cache
-        uses: actions/cache@v4
-        with:
-          path: data/listings.db
-          key: listings-db-${{ github.run_id }}
 
       - name: Commit updated database
         run: |

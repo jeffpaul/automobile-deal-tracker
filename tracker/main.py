@@ -11,19 +11,21 @@ from tracker.alerts import (
     send_low_inventory_warning,
     send_vehicle_anomaly_warning,
 )
-from tracker.config import SCORE_DAILY_DIGEST, SCORE_INSTANT_ALERT
+from tracker.config import CARFAX_ENABLED, SCORE_DAILY_DIGEST, SCORE_INSTANT_ALERT, VEHICLES
 from tracker.scorer import compute_market_averages, market_avg_for, score_listing
 from tracker.sources.carfax import fetch_carfax
 from tracker.sources.marketcheck import fetch_marketcheck
 from tracker.store import (
     get_alerted_vins,
     get_market_snapshot,
+    get_recently_gone,
     get_stored_market_averages,
     get_vehicle_count_history,
     init_db,
     log_run,
     mark_alerted,
     merge_listings,
+    update_scores,
     upsert_listings,
 )
 
@@ -65,10 +67,9 @@ def main() -> None:
     source_status: dict[str, bool] = {}
     errors: list[str] = []
 
-    sources = {
-        "marketcheck": fetch_marketcheck,
-        "carfax": fetch_carfax,
-    }
+    sources = {"marketcheck": fetch_marketcheck}
+    if CARFAX_ENABLED:
+        sources["carfax"] = fetch_carfax
 
     with ThreadPoolExecutor(max_workers=5) as executor:
         futures = {executor.submit(fn): name for name, fn in sources.items()}
@@ -93,7 +94,10 @@ def main() -> None:
 
     # Per-vehicle MarketCheck counts, for both the anomaly check below and the
     # history this check compares future runs against.
-    vehicle_counts: dict[str, int] = {}
+    # Every tracked vehicle gets an entry, so a vehicle stuck at 0 (e.g.
+    # Outlander PHEV) is recorded and shows up in the digest instead of
+    # silently missing.
+    vehicle_counts: dict[str, int] = {f"{v['make']} {v['model_label']}": 0 for v in VEHICLES}
     for l in all_listings:
         if l.get("source") == "marketcheck":
             key = f"{l.get('make', '')} {l.get('model', '')}"
@@ -117,20 +121,17 @@ def main() -> None:
                 source_status, errors, vehicle_counts)
         return
 
-    # First scoring pass — price/trim/mileage/DOM signals only (no history yet)
-    market_avgs = compute_market_averages(merged)
-    if not market_avgs:
-        market_avgs = get_stored_market_averages()
-    else:
-        stored = get_stored_market_averages()
-        for k, v in stored.items():
-            if k not in market_avgs:
-                market_avgs[k] = v
+    # Upsert first: it attaches each listing's price history, which the
+    # price-drop component needs. Scores are written back afterwards.
+    stats = upsert_listings(merged)
 
+    # Mileage-adjusted market model from this run's listings; falls back to
+    # the last run's active listings if this run produced no usable prices.
+    market_avgs = compute_market_averages(merged) or get_stored_market_averages()
     for listing in merged:
         listing["composite_score"] = score_listing(listing, market_avg_for(listing, market_avgs))
+    update_scores(merged)
 
-    stats = upsert_listings(merged)
     already_alerted = get_alerted_vins()
 
     # Alert logic
@@ -147,13 +148,16 @@ def main() -> None:
     alerts_sent = 0
     if great_deals:
         logger.info("Sending instant alerts for %d great deals", len(great_deals))
-        alerts_sent = send_instant_alerts(great_deals, market_avgs)
-        if alerts_sent:
-            mark_alerted([l["vin"] for l in great_deals[:alerts_sent]])
+        sent_vins = send_instant_alerts(great_deals, market_avgs)
+        if sent_vins:
+            mark_alerted(sent_vins)
+        alerts_sent = len(sent_vins)
         stats["alerts_sent"] = alerts_sent
 
     snapshot = get_market_snapshot()
-    digest_sent = send_daily_digest(good_deals, market_avgs, snapshot, stats, source_status)
+    snapshot["vehicle_counts"] = vehicle_counts
+    gone = get_recently_gone(SCORE_DAILY_DIGEST)
+    digest_sent = send_daily_digest(good_deals, market_avgs, snapshot, stats, source_status, gone)
     if digest_sent:
         logger.info("Daily digest sent with %d deals", len(good_deals))
 

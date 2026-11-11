@@ -15,10 +15,39 @@ SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 
+def _env_int(name: str, default: int) -> int:
+    """Int from the environment; unset or blank (e.g. an undefined GitHub
+    Actions variable expands to "") falls back to the default."""
+    raw = (os.environ.get(name) or "").strip()
+    return int(raw) if raw else default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = (os.environ.get(name) or "").strip().lower()
+    return raw in ("1", "true", "yes", "on") if raw else default
+
+
 # Search parameters
 SEARCH_ZIP = "60515"           # Downers Grove, IL
 SEARCH_LOCATION = "Downers Grove, IL"
 SEARCH_RADIUS_MILES = 100
+
+# MarketCheck pagination cap per query. Basic plan allows 1500 rows; the Free
+# plan (500 calls/month, 100 mi radius) allows 500. Set MC_MAX_ROWS=500 when on
+# Free — a vehicle whose result count exceeds this is re-queried one model year
+# at a time so nothing is silently dropped.
+MC_MAX_ROWS = _env_int("MC_MAX_ROWS", 1500)
+
+# Server-side filters — listings outside these never cost a page. Listings
+# with no asking price can't be scored, and very high-mileage cars aren't
+# what this tracker is looking for.
+MC_MAX_MILES = _env_int("MC_MAX_MILES", 60000)
+MC_MIN_PRICE = 5000
+
+# CARFAX via Apify is off by default: across 267 daily runs it contributed 8
+# VINs total, and data/history_overrides.json (hand-read reports) covers the
+# cars that matter. Set CARFAX_ENABLED=true to turn it back on.
+CARFAX_ENABLED = _env_bool("CARFAX_ENABLED", False)
 
 # Tracked vehicles. Each drives an independent MarketCheck + CARFAX query since
 # year range, MC model taxonomy, and CARFAX model-name quirks all differ per
@@ -116,3 +145,9 @@ SCORE_DAILY_DIGEST = 45
 
 # Carvana delivery fee estimate (added to listing price before scoring)
 CARVANA_DELIVERY_FEE = 999
+
+# Dealers whose prices aren't negotiable — scored with a small penalty.
+NO_HAGGLE_DEALERS = ("carmax", "carvana")
+
+# Digest layout
+DIGEST_TOP_N = 10
