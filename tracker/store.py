@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS listings (
     cargurus_explanation  TEXT,
     truecar_market_price  INTEGER,
     no_accidents          INTEGER DEFAULT 0,
+    clean_title           INTEGER,
     one_owner             INTEGER DEFAULT 0,
     service_record_count  INTEGER DEFAULT 0,
     carfax_badge          TEXT,
@@ -80,6 +81,7 @@ def init_db() -> None:
         ("ref_price", "REAL"),
         ("price_change_percent", "REAL"),
         ("make", "TEXT"),
+        ("clean_title", "INTEGER"),
     ]:
         try:
             conn.execute(f"ALTER TABLE listings ADD COLUMN {col} {typedef}")
@@ -178,7 +180,11 @@ def merge_listings(raw_listings: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 # For non-CARFAX sources, only promote if no CARFAX data seen yet
                 if "carfax" not in (existing.get("_sources") or []):
                     for f in ("no_accidents", "one_owner"):
-                        existing[f] = max(int(existing.get(f) or 0), int(item.get(f) or 0))
+                        if item.get(f) is not None:
+                            existing[f] = max(int(existing.get(f) or 0), int(item[f]))
+
+            if item.get("clean_title") is not None:
+                existing["clean_title"] = item["clean_title"]
 
             # OR-merge feature flags (union of equipment across sources is correct)
             for flag in ("cold_weather_group", "has_blind_spot_mon"):
@@ -225,6 +231,9 @@ def upsert_listings(merged: list[dict[str, Any]]) -> dict[str, int]:
                 price_history.append({"date": now[:10], "price": old_price})
                 if new_price < old_price:
                     stats["price_drops"] += 1
+                    lst["_price_cut_from"] = old_price
+            lst["price_history"] = json.dumps(price_history)
+            lst["first_seen"] = row["first_seen"]
 
             conn.execute(
                 """UPDATE listings SET
@@ -234,7 +243,7 @@ def upsert_listings(merged: list[dict[str, Any]]) -> dict[str, int]:
                     pricing_type = ?, source_type = ?,
                     cargurus_deal_label = ?, cargurus_deal_score = ?,
                     cargurus_explanation = ?, truecar_market_price = ?,
-                    no_accidents = ?, one_owner = ?, service_record_count = ?,
+                    no_accidents = ?, clean_title = ?, one_owner = ?, service_record_count = ?,
                     carfax_badge = ?, dealer_rating = ?,
                     cold_weather_group = ?, has_blind_spot_mon = ?,
                     ref_price = ?, price_change_percent = ?,
@@ -260,8 +269,9 @@ def upsert_listings(merged: list[dict[str, Any]]) -> dict[str, int]:
                     lst.get("cargurus_deal_score"),
                     lst.get("cargurus_explanation"),
                     lst.get("truecar_market_price"),
-                    lst.get("no_accidents", 0),
-                    lst.get("one_owner", 0),
+                    lst.get("no_accidents") or 0,
+                    lst.get("clean_title"),
+                    lst.get("one_owner") or 0,
                     lst.get("service_record_count", 0),
                     lst.get("carfax_badge"),
                     lst.get("dealer_rating"),
@@ -278,19 +288,22 @@ def upsert_listings(merged: list[dict[str, Any]]) -> dict[str, int]:
         else:
             # New listing
             stats["new"] += 1
+            lst["_is_new"] = True
+            lst["price_history"] = "[]"
+            lst["first_seen"] = now
             conn.execute(
                 """INSERT INTO listings (
                     vin, sources, year, make, model, trim, price, mileage,
                     city, state, dealer_name, listing_url, exterior_color,
                     days_on_market, pricing_type, source_type,
                     cargurus_deal_label, cargurus_deal_score, cargurus_explanation,
-                    truecar_market_price, no_accidents, one_owner,
+                    truecar_market_price, no_accidents, clean_title, one_owner,
                     service_record_count, carfax_badge, dealer_rating,
                     cold_weather_group, has_blind_spot_mon,
                     ref_price, price_change_percent,
                     composite_score, first_seen, last_seen, price_history, alerted
                 ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0
                 )""",
                 (
                     vin,
@@ -313,8 +326,9 @@ def upsert_listings(merged: list[dict[str, Any]]) -> dict[str, int]:
                     lst.get("cargurus_deal_score"),
                     lst.get("cargurus_explanation"),
                     lst.get("truecar_market_price"),
-                    lst.get("no_accidents", 0),
-                    lst.get("one_owner", 0),
+                    lst.get("no_accidents") or 0,
+                    lst.get("clean_title"),
+                    lst.get("one_owner") or 0,
                     lst.get("service_record_count", 0),
                     lst.get("carfax_badge"),
                     lst.get("dealer_rating"),
@@ -352,41 +366,91 @@ def mark_alerted(vins: list[str]) -> None:
     conn.close()
 
 
-def get_unalerted_great_deals(min_score: float = 80.0) -> list[dict]:
+def update_scores(listings: list[dict[str, Any]]) -> None:
+    """Write composite scores computed after upsert (scoring needs the
+    price history upsert_listings() attaches)."""
     conn = _get_conn()
+    conn.executemany(
+        "UPDATE listings SET composite_score = ? WHERE vin = ?",
+        [(l.get("composite_score"), l["vin"]) for l in listings],
+    )
+    conn.commit()
+    conn.close()
+
+
+# Every listing upserted in a run gets that run's exact last_seen timestamp,
+# so "seen in the latest run" is last_seen == MAX(last_seen). Listings that
+# have sold or been delisted keep an older last_seen forever.
+_ACTIVE = "last_seen = (SELECT MAX(last_seen) FROM listings)"
+
+
+def _run_timestamps(conn: sqlite3.Connection, n: int = 2) -> list[str]:
     rows = conn.execute(
-        "SELECT * FROM listings WHERE composite_score >= ? AND alerted = 0 ORDER BY composite_score DESC",
-        (min_score,),
+        "SELECT DISTINCT last_seen FROM listings ORDER BY last_seen DESC LIMIT ?", (n,)
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def get_active_listings() -> list[dict]:
+    conn = _get_conn()
+    rows = conn.execute(f"SELECT * FROM listings WHERE {_ACTIVE}").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_recently_gone(min_score: float) -> list[dict]:
+    """Listings seen in the previous run but not this one — sold or pulled —
+    limited to ones worth mentioning (alerted, or scored >= min_score)."""
+    conn = _get_conn()
+    stamps = _run_timestamps(conn, 2)
+    # If nothing dropped out last run, the second timestamp belongs to an
+    # older run whose departures were already reported — skip it.
+    if len(stamps) < 2 or (
+        datetime.fromisoformat(stamps[0]) - datetime.fromisoformat(stamps[1])
+    ).total_seconds() > 36 * 3600:
+        conn.close()
+        return []
+    rows = conn.execute(
+        "SELECT * FROM listings WHERE last_seen = ? AND (alerted = 1 OR composite_score >= ?) "
+        "ORDER BY composite_score DESC",
+        (stamps[1], min_score),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 
+def _price_on(price_history: list[dict], current_price: int, date: str) -> int:
+    """Price as of `date` (YYYY-MM-DD). Each history entry records the price a
+    listing changed *away from* on that date, so the price on `date` is the
+    old price of the first change after it, or the current price if none."""
+    for entry in price_history:
+        if entry.get("date", "") > date:
+            return entry.get("price") or current_price
+    return current_price
+
+
 def get_price_trend(days: int = 7) -> dict[tuple, dict[str, float | None]]:
-    """Return average price per (model, trim) today vs. N days ago."""
+    """Average price per (model, trim) today vs. N days ago, over the same
+    cars: listings active now that were already listed N days ago. (The old
+    version compared active listings against sold ones.)"""
     from datetime import timedelta
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    conn = _get_conn()
-    rows = conn.execute(
-        "SELECT model, trim, price, last_seen FROM listings WHERE price IS NOT NULL"
-    ).fetchall()
-    conn.close()
-
-    today_prices: dict[tuple, list[float]] = {}
-    old_prices: dict[tuple, list[float]] = {}
-    for r in rows:
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
+    trend: dict[tuple, dict[str, list[int]]] = {}
+    for r in get_active_listings():
+        if not r.get("price") or (r.get("first_seen") or "")[:10] > cutoff:
+            continue
+        try:
+            history = json.loads(r.get("price_history") or "[]")
+        except Exception:
+            history = []
         key = (r["model"], r["trim"])
-        if r["last_seen"] >= cutoff:
-            today_prices.setdefault(key, []).append(r["price"])
-        else:
-            old_prices.setdefault(key, []).append(r["price"])
-
-    trend = {}
-    for key in set(list(today_prices.keys()) + list(old_prices.keys())):
-        today_avg = sum(today_prices.get(key, [])) / len(today_prices[key]) if today_prices.get(key) else None
-        old_avg = sum(old_prices.get(key, [])) / len(old_prices[key]) if old_prices.get(key) else None
-        trend[key] = {"today": today_avg, "7d_ago": old_avg}
-    return trend
+        t = trend.setdefault(key, {"today": [], "then": []})
+        t["today"].append(r["price"])
+        t["then"].append(_price_on(history, r["price"], cutoff))
+    return {
+        key: {"today": sum(v["today"]) / len(v["today"]), "7d_ago": sum(v["then"]) / len(v["then"])}
+        for key, v in trend.items()
+    }
 
 
 def log_run(
@@ -437,57 +501,32 @@ def get_vehicle_count_history(lookback: int = 7) -> dict[str, list[int]]:
     return history
 
 
-def get_stored_market_averages() -> dict[tuple, float]:
-    """Pull market averages from all listings currently in the DB."""
+def get_stored_market_averages() -> dict:
+    """Market model built from the listings active as of the last run."""
     from tracker.scorer import compute_market_averages
-    conn = _get_conn()
-    rows = conn.execute(
-        "SELECT model, trim, year, price FROM listings WHERE price IS NOT NULL AND price > 5000"
-    ).fetchall()
-    conn.close()
-    return compute_market_averages([dict(r) for r in rows])
+    return compute_market_averages([l for l in get_active_listings() if (l.get("price") or 0) > 5000])
 
 
 def get_market_snapshot() -> dict:
-    """Return stats for the email market snapshot section."""
-    conn = _get_conn()
-    rows = conn.execute(
-        "SELECT * FROM listings WHERE price IS NOT NULL ORDER BY composite_score DESC"
-    ).fetchall()
-    conn.close()
-
-    listings = [dict(r) for r in rows]
-    total = len(listings)
+    """Stats for the email market snapshot — active listings only."""
+    from collections import defaultdict
+    listings = get_active_listings()
+    listings.sort(key=lambda l: l.get("composite_score") or 0, reverse=True)
 
     # Average price by (model, trim) — grouping by trim alone would blend
     # e.g. "SE" across Outlander PHEV, Tucson PHEV, and RAV4 Prime
-    from collections import defaultdict
     model_trim_prices: dict[tuple, list[int]] = defaultdict(list)
-    for lst in listings:
-        if lst.get("trim") and lst.get("price"):
-            model_trim_prices[(lst.get("model", ""), lst["trim"])].append(lst["price"])
-
-    avg_by_model_trim = {
-        key: int(sum(prices) / len(prices))
-        for key, prices in model_trim_prices.items()
-    }
-
-    # Listings with clean CARFAX signals
-    great_good = sum(
-        1 for l in listings
-        if l.get("no_accidents") and l.get("one_owner")
-    )
-
-    # Lowest price per tracked model
     model_prices: dict[str, list[int]] = defaultdict(list)
     for lst in listings:
-        if lst.get("model") and lst.get("price"):
-            model_prices[lst["model"]].append(lst["price"])
-    lowest_by_model = {model: min(prices) for model, prices in model_prices.items()}
+        if lst.get("price"):
+            if lst.get("trim"):
+                model_trim_prices[(lst.get("model", ""), lst["trim"])].append(lst["price"])
+            if lst.get("model"):
+                model_prices[lst["model"]].append(lst["price"])
 
     return {
-        "total": total,
-        "avg_by_model_trim": avg_by_model_trim,
-        "great_good_deal_count": great_good,
-        "lowest_by_model": lowest_by_model,
+        "total": len(listings),
+        "avg_by_model_trim": {k: int(sum(v) / len(v)) for k, v in model_trim_prices.items()},
+        "verified_clean_count": sum(1 for l in listings if l.get("no_accidents") and l.get("one_owner")),
+        "lowest_by_model": {m: min(p) for m, p in model_prices.items()},
     }
