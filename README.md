@@ -1,6 +1,6 @@
 # PHEV/4xe Deal Tracker
 
-Automated deal tracker for plug-in hybrid SUVs, tuned for **winter daily driver** use in the Chicago area. Runs daily via GitHub Actions, pulls inventory from MarketCheck and CARFAX, scores each listing 0–100, and emails alerts for great deals.
+Automated deal tracker for plug-in hybrid SUVs, tuned for **winter daily driver** use in the Chicago area. Runs daily via GitHub Actions, pulls inventory from MarketCheck (CARFAX via Apify is optional and off by default), scores each listing 0–100, and emails alerts for great deals.
 
 ### Tracked vehicles
 
@@ -20,22 +20,24 @@ Calibrated for a teen driver in Chicago winter conditions — **not** off-road c
 
 **Jeep 4xe:** The Sahara and High Altitude trims score highest because they ship with all-season tires, blind spot monitoring, and on-road suspension. The Willys and Rubicon are penalized because their mud-terrain tires perform worse on packed snow and ice.
 
+**Grand Cherokee 4xe:** Quadra-Trac 4x4 is standard on every 4xe trim, so it gets its own light table (`GRAND_CHEROKEE_4XE_TRIM_WEIGHTS`): base, Anniversary, Overland, and Limited are slightly preferred; Summit/Summit Reserve (21" wheels) and Trailhawk (all-terrain tires) are slightly penalized.
+
 **Outlander PHEV / Tucson PHEV / RAV4 Prime:** These ship AWD (or Mitsubishi's S-AWC) standard on every trim, so the trim-level winter penalty is much smaller than Jeep's — mainly wheel size (larger wheels/lower-profile tires trade off snow traction, same logic as the Jeep Rubicon penalty) and which trims include heated seat/wheel packages standard. See `OUTLANDER_PHEV_TRIM_WEIGHTS`, `TUCSON_PHEV_TRIM_WEIGHTS`, and `RAV4_PRIME_TRIM_WEIGHTS` in [`tracker/scorer.py`](tracker/scorer.py) — these are a light nudge, not a hard filter, since the Cold Weather Group component already rewards heated packages directly from CARFAX option data regardless of trim.
 
 ### Score components (max 100 pts)
 
 | Component | Max pts | Signal |
 |-----------|---------|--------|
-| Price vs. market average | 35 | How far below the average price for this model/trim/year (falls back to model/trim, then model/year, then model when fewer than 5 comparable listings) |
+| Price vs. fair price | 35 | How far below the **mileage-adjusted** market price: the average for this model/trim/year (falls back to model/trim, then model/year, then model when fewer than 5 comparable listings), moved by the model's $/mile depreciation for the gap between this car's mileage and the group's average |
 | Price vs. MC reference price | 15 | MarketCheck's per-car market value estimate |
-| CARFAX history | 15 | No accidents (+8), 1 owner (+4), Great Value badge (+3) |
+| History | 15 | Verified no accidents (+8, from CARFAX or `data/history_overrides.json`), 1 owner (+4), clean title when accidents are unknown (+2), CARFAX Great Value badge (+3) |
 | Trim | 12 | Winter-favorable trims preferred (see Scoring rationale above) |
 | Mileage | 12 | Under 10k (+12) down to over 40k (−4) |
 | Days on market | 8 | Fresh listing (+8); stale 60d+ (−4) |
 | Price drop | 8 | Dealer cut or DB-tracked drop since first seen |
 | Cold Weather Group | 3 | Heated seats + wheel + remote start (from CARFAX options) |
 | Dealer rating | 2 | ≥4.5 stars (+2); <3.5 stars (−3) |
-| Pricing type | −5 | No-haggle listings (CarMax, Carvana) penalized |
+| Pricing type | −5 | No-haggle listings (CarMax, Carvana) penalized; Carvana's delivery fee is added to its price |
 
 ### Alert thresholds
 
@@ -43,6 +45,8 @@ Calibrated for a teen driver in Chicago winter conditions — **not** off-road c
 |-------|--------|
 | ≥ 65 | Instant email — fires once per VIN |
 | ≥ 45 | Included in daily digest |
+
+The daily digest leads with what changed since the last run (new listings, price cuts, and previously alerted or digest-worthy cars that sold), then shows the top 10 as full cards and the rest as one-line rows, then a market snapshot of listings active today.
 
 ## Setup
 
@@ -67,14 +71,21 @@ Required credentials:
 
 | Variable | Where to get it |
 |----------|----------------|
-| `MARKETCHECK_API_KEY` | [marketcheck.com](https://www.marketcheck.com) developer portal — Basic plan ($299/mo) or higher |
-| `APIFY_API_TOKEN` | [apify.com](https://apify.com) — uses `parseforge/carfax-scraper` actor |
+| `MARKETCHECK_API_KEY` | [marketcheck.com](https://www.marketcheck.com) developer portal. The Free plan (500 calls/month, 100 mi radius, 500-row pagination) covers this tracker's ~10 calls/day — set `MC_MAX_ROWS=500` on it. Basic ($299/mo) allows 1,500 rows. |
 | `ALERT_EMAIL_TO` | Destination email address for alerts |
 | `ALERT_EMAIL_FROM` | Sending address (Gmail recommended) |
 | `SMTP_HOST` | SMTP server (default: `smtp.gmail.com`) |
 | `SMTP_PORT` | SMTP port (default: `587`) |
 | `SMTP_USER` | SMTP username |
 | `SMTP_PASSWORD` | Gmail App Password (16 chars) — [myaccount.google.com > Security > App passwords](https://myaccount.google.com/apppasswords) |
+
+Optional settings (in GitHub Actions, set these as repository **variables**, not secrets):
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `MC_MAX_ROWS` | `1500` | MarketCheck rows per query. Use `500` on the Free plan; a vehicle with more results is re-queried one model year at a time. |
+| `MC_MAX_MILES` | `60000` | Server-side mileage cap — higher-mileage listings never cost a page. |
+| `CARFAX_ENABLED` | `false` | Turn the Apify CARFAX source back on (also needs `APIFY_API_TOKEN`). |
 
 ### 3. Run locally
 
@@ -107,7 +118,7 @@ tracker/
 
 **MarketCheck** (primary) — provides price, trim, mileage, days on market, dealer info, `ref_price` (market value estimate), `price_change_percent`, and embedded CARFAX signals (`carfax_1_owner`, `carfax_clean_title`) on every listing. Wrangler 4xe is its own distinct MC model, but Grand Cherokee 4xe, Outlander PHEV, Tucson PHEV, and RAV4 Prime are not broken out as separate models in MC's taxonomy — they're queried as the base model (`"Grand Cherokee"`, `"Outlander"`, etc.) filtered server-side by `build.powertrain_type == "PHEV"`, which cleanly separates them from gas/hybrid trims sharing the same trim names.
 
-**CARFAX via Apify** (`parseforge/carfax-scraper`) — provides richer history signals: `noAccidents`, `oneOwner`, CARFAX badge (Great/Good Value), and option lists used to detect Cold Weather Group equipment. CARFAX doesn't index "Wrangler 4xe"/"Grand Cherokee 4xe" as their own model, so those two query CARFAX's bare model name and filter post-fetch for `"4xe"` in the trim string. CARFAX is **skipped entirely** for Outlander PHEV, Tucson PHEV, and RAV4 Prime — the actor exposes no fuel-type/powertrain field, and their trim names ("SE", "SEL", "Limited") are identical between the PHEV and gas/hybrid versions, so there's no reliable way to tell them apart from CARFAX data alone. Those three rely on MarketCheck only (see below).
+**CARFAX via Apify** (`parseforge/carfax-scraper`, optional — off unless `CARFAX_ENABLED=true`). Across its first 267 daily runs it contributed 8 VINs total, so it's disabled by default; hand-read reports in `data/history_overrides.json` cover the cars that matter. When enabled, it provides richer history signals: `noAccidents`, `oneOwner`, CARFAX badge (Great/Good Value), and option lists used to detect Cold Weather Group equipment. CARFAX doesn't index "Wrangler 4xe"/"Grand Cherokee 4xe" as their own model, so those two query CARFAX's bare model name and filter post-fetch for `"4xe"` in the trim string. CARFAX is **skipped entirely** for Outlander PHEV, Tucson PHEV, and RAV4 Prime — the actor exposes no fuel-type/powertrain field, and their trim names ("SE", "SEL", "Limited") are identical between the PHEV and gas/hybrid versions, so there's no reliable way to tell them apart from CARFAX data alone. Those three rely on MarketCheck only (see below).
 
 ### Deduplication
 
@@ -115,7 +126,7 @@ Listings are keyed by VIN. When the same car appears in both sources, records ar
 
 ## Database
 
-SQLite at `data/listings.db`. Persisted between GitHub Actions runs via Actions cache + git commit (`[skip ci]`). Key tables:
+SQLite at `data/listings.db`. Persisted between GitHub Actions runs by a git commit (`[skip ci]`) at the end of each run. A listing is "active" when its `last_seen` matches the latest run; sold or delisted cars keep their older `last_seen`. Key tables:
 
 - `listings` — one row per VIN, merged from all sources, with full price history as JSON
 - `runs` — one row per tracker run with stats and per-source health flags

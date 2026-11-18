@@ -16,7 +16,7 @@ from tracker.config import (
     SMTP_USER,
     SMTP_PASSWORD,
 )
-from tracker.config import SEARCH_ZIP, SEARCH_RADIUS_MILES, SCORE_DAILY_DIGEST
+from tracker.config import DIGEST_TOP_N, SEARCH_ZIP, SEARCH_RADIUS_MILES, SCORE_DAILY_DIGEST
 from tracker.scorer import is_winter_penalized_trim, market_avg_for, score_breakdown
 
 logger = logging.getLogger(__name__)
@@ -150,8 +150,10 @@ def _listing_card_html(lst: dict[str, Any], market_avg: float | None) -> str:
 
     pct_str = ""
     if market_avg and price and market_avg > 0:
-        pct = (market_avg - price) / market_avg * 100
-        pct_str = f" ({pct:+.1f}% vs. market avg)"
+        diff = market_avg - price
+        word = "under" if diff >= 0 else "over"
+        pct_str = (f" — ${abs(diff):,.0f} {word} fair price of {_format_price(int(market_avg))}"
+                   f" for its mileage")
 
     location = ", ".join(filter(None, [lst.get("city"), lst.get("state")]))
     dealer_name = lst.get("dealer_name") or ""
@@ -176,10 +178,12 @@ def _listing_card_html(lst: dict[str, Any], market_avg: float | None) -> str:
 
     carfax_parts = []
     if lst.get("no_accidents"):
-        carfax_parts.append("✅ No accidents")
+        carfax_parts.append("✅ No accidents (verified)")
+    elif lst.get("clean_title"):
+        carfax_parts.append("✅ Clean title (accidents unknown)")
     if lst.get("one_owner"):
         carfax_parts.append("✅ 1 owner")
-    carfax_html = "  ".join(carfax_parts) if carfax_parts else "No data"
+    carfax_html = "  ".join(carfax_parts) if carfax_parts else "Unknown — pull a report"
 
     winter_kit = ""
     if lst.get("cold_weather_group"):
@@ -245,12 +249,12 @@ def _listing_card_html(lst: dict[str, Any], market_avg: float | None) -> str:
   <div style="font-size:18px;font-weight:bold;margin-bottom:12px">{year} {make} {model} {trim}</div>
   <table style="font-size:14px;border-collapse:collapse;width:100%">
     <tr><td style="padding:4px 0;color:#666;width:130px">Price</td><td style="padding:4px 0"><strong>{_format_price(price)}</strong>{pct_str}</td></tr>
-    <tr><td style="padding:4px 0;color:#666">Mileage</td><td style="padding:4px 0">{lst.get("mileage") or "N/A":,} miles</td></tr>
+    <tr><td style="padding:4px 0;color:#666">Mileage</td><td style="padding:4px 0">{f"{lst['mileage']:,} miles" if lst.get("mileage") is not None else "N/A"}</td></tr>
     <tr><td style="padding:4px 0;color:#666">Location</td><td style="padding:4px 0">{location}</td></tr>
     <tr><td style="padding:4px 0;color:#666">Dealer</td><td style="padding:4px 0">{dealer_str}</td></tr>
     <tr><td style="padding:4px 0;color:#666">Listed</td><td style="padding:4px 0">{dom_str}</td></tr>
     {f'<tr><td style="padding:4px 0;color:#666">MC rating</td><td style="padding:4px 0">{ref_html}</td></tr>' if ref_html else ""}
-    <tr><td style="padding:4px 0;color:#666">CARFAX</td><td style="padding:4px 0">{carfax_html}</td></tr>
+    <tr><td style="padding:4px 0;color:#666">History</td><td style="padding:4px 0">{carfax_html}</td></tr>
     {f'<tr><td style="padding:4px 0;color:#666">Winter kit</td><td style="padding:4px 0">{winter_kit}</td></tr>' if winter_kit else ""}
     {f'<tr><td style="padding:4px 0;color:#666">Safety tech</td><td style="padding:4px 0">{safety_html}</td></tr>' if safety_html else ""}
     <tr><td style="padding:4px 0;color:#666">Sources</td><td style="padding:4px 0">{", ".join(sources_list)}</td></tr>
@@ -263,9 +267,10 @@ def _listing_card_html(lst: dict[str, Any], market_avg: float | None) -> str:
 </div>"""
 
 
-def send_instant_alerts(listings: list[dict[str, Any]], market_avgs: dict) -> int:
-    """Send one email per great deal listing. Returns count sent."""
-    sent = 0
+def send_instant_alerts(listings: list[dict[str, Any]], market_avgs: dict) -> list[str]:
+    """Send one email per great deal listing. Returns the VINs actually sent,
+    so a failed send in the middle doesn't mark the wrong cars alerted."""
+    sent: list[str] = []
     for lst in listings:
         trim = lst.get("trim") or ""
         year = lst.get("year") or ""
@@ -278,7 +283,7 @@ def send_instant_alerts(listings: list[dict[str, Any]], market_avgs: dict) -> in
         pct_below = ""
         if market_avg and price:
             pct = (market_avg - price) / market_avg * 100
-            pct_below = f" ({abs(pct):.0f}% below market)"
+            pct_below = f" ({abs(pct):.0f}% {'below' if pct >= 0 else 'above'} fair price)"
 
         cwg = " + Cold Weather Group" if lst.get("cold_weather_group") else ""
         subject = f"🚨 Great Deal: {year} {make} {model} {trim} — {_format_price(price)}{pct_below}{cwg}"
@@ -294,9 +299,41 @@ def send_instant_alerts(listings: list[dict[str, Any]], market_avgs: dict) -> in
 </body></html>"""
 
         if _send_email(subject, body):
-            sent += 1
+            sent.append(lst["vin"])
 
     return sent
+
+
+def _compact_row(lst: dict[str, Any], market_avg: float | None, note: str = "") -> str:
+    """One-line table row for a listing (digest sections beyond the top N)."""
+    price = lst.get("price")
+    under = ""
+    if market_avg and price:
+        diff = market_avg - price
+        under = f"${abs(diff):,.0f} {'under' if diff >= 0 else 'over'}"
+    miles = f"{lst['mileage']:,}" if lst.get("mileage") is not None else "?"
+    location = ", ".join(filter(None, [lst.get("city"), lst.get("state")]))
+    url = lst.get("listing_url") or "#"
+    note_html = f' <span style="color:#090">{note}</span>' if note else ""
+    td = "padding:4px 6px;border-bottom:1px solid #eee"
+    return (
+        f"<tr><td style='{td}'><a href='{url}'>{lst.get('year') or ''} {lst.get('model') or ''} {lst.get('trim') or ''}</a>"
+        f"{note_html}</td>"
+        f"<td style='{td}'>{_format_price(price)}</td><td style='{td}'>{under}</td>"
+        f"<td style='{td}'>{miles}</td><td style='{td}'>{lst.get('dealer_name') or ''}"
+        f"{f' ({location})' if location else ''}</td>"
+        f"<td style='{td}'>{(lst.get('composite_score') or 0):.0f}</td></tr>"
+    )
+
+
+def _compact_table(rows_html: str) -> str:
+    th = "padding:4px 6px;text-align:left;border-bottom:2px solid #ccc"
+    return (
+        "<table style='font-size:13px;border-collapse:collapse;width:100%'>"
+        f"<tr><th style='{th}'>Car</th><th style='{th}'>Price</th><th style='{th}'>vs. fair</th>"
+        f"<th style='{th}'>Miles</th><th style='{th}'>Dealer</th><th style='{th}'>Score</th></tr>"
+        f"{rows_html}</table>"
+    )
 
 
 def send_daily_digest(
@@ -305,40 +342,82 @@ def send_daily_digest(
     snapshot: dict,
     stats: dict,
     source_status: dict,
+    gone: list[dict[str, Any]] | None = None,
 ) -> bool:
+    """Daily digest, ordered for a quick skim: what changed since the last
+    run, then the top-N shortlist as full cards, then the rest as one-line
+    rows, then the market snapshot."""
+    gone = gone or []
     today = datetime.now(timezone.utc).strftime("%b %d, %Y")
     n = len(good_deals)
     subject = f"🔌 PHEV/4xe Digest — {today} — {n} deal{'s' if n != 1 else ''} worth seeing"
 
-    # Market snapshot
+    sorted_deals = sorted(good_deals, key=lambda l: l.get("composite_score") or 0, reverse=True)
+    top = sorted_deals[:DIGEST_TOP_N]
+    rest = sorted_deals[DIGEST_TOP_N:]
+
+    # --- Since the last run ---
+    change_rows = ""
+    for lst in sorted_deals:
+        note = ""
+        if lst.get("_is_new"):
+            note = "NEW"
+        elif lst.get("_price_cut_from") and lst.get("price"):
+            note = f"CUT ↓${lst['_price_cut_from'] - lst['price']:,}"
+        if note:
+            change_rows += _compact_row(lst, market_avg_for(lst, market_avgs), note)
+    gone_rows = "".join(
+        _compact_row(lst, None, "ALERTED" if lst.get("alerted") else "") for lst in gone
+    )
+    changes_html = ""
+    if change_rows or gone_rows:
+        changes_html = "<h2>Since the last run</h2>"
+        if change_rows:
+            changes_html += "<p style='margin-bottom:4px'><strong>New or price-cut deals</strong></p>" + _compact_table(change_rows)
+        if gone_rows:
+            changes_html += ("<p style='margin-bottom:4px'><strong>Gone (sold or delisted)</strong> — "
+                             "previously alerted or digest-worthy</p>" + _compact_table(gone_rows))
+
+    # --- Top N cards + compact rest ---
+    cards_html = "".join(_listing_card_html(lst, market_avg_for(lst, market_avgs)) for lst in top)
+    rest_html = ""
+    if rest:
+        rest_html = (f"<h3>Also worth a look ({len(rest)})</h3>"
+                     + _compact_table("".join(_compact_row(l, market_avg_for(l, market_avgs)) for l in rest)))
+    no_deals_msg = ""
+    if not good_deals:
+        no_deals_msg = f"<p style='color:#888'>No listings scored ≥ {SCORE_DAILY_DIGEST} this run. Check back next time.</p>"
+
+    # --- Market snapshot (active listings only) ---
     avg_rows = ""
     for (model, trim), avg in sorted(snapshot.get("avg_by_model_trim", {}).items()):
         avg_rows += f"<tr><td style='padding:3px 8px'>{model} {trim}</td><td style='padding:3px 8px'>{_format_price(int(avg))}</td></tr>"
 
     price_trend_rows = ""
     from tracker.store import get_price_trend
-    trend = get_price_trend(7)
-    for (model, trim), data in sorted(trend.items()):
-        t = data.get("today")
-        old = data.get("7d_ago")
+    for (model, trim), data in sorted(get_price_trend(7).items()):
+        t, old = data.get("today"), data.get("7d_ago")
         if t and old:
             diff = t - old
             arrow = "⬆️" if diff > 200 else ("⬇️" if diff < -200 else "➡️")
-            price_trend_rows += f"<tr><td style='padding:3px 8px'>{model} {trim}</td><td style='padding:3px 8px'>{arrow} {_format_price(int(abs(diff)))} {'up' if diff > 0 else 'down'} vs. 7d ago</td></tr>"
+            price_trend_rows += f"<tr><td style='padding:3px 8px'>{model} {trim}</td><td style='padding:3px 8px'>{arrow} {_format_price(int(abs(diff)))} {'up' if diff > 0 else 'down'} vs. 7d ago (same cars)</td></tr>"
 
-    source_status_html = " · ".join(
-        f"{'✅' if ok else '❌'} {src}" for src, ok in source_status.items()
+    count_items = "".join(
+        f"<li>{v}: <strong>{c}</strong>{' ⚠️ none found — check the query with scripts/probe_vehicle.py' if c == 0 else ''}</li>"
+        for v, c in sorted(snapshot.get("vehicle_counts", {}).items())
     )
-
-    lowest_rows = ""
-    for model, price in sorted(snapshot.get("lowest_by_model", {}).items()):
-        lowest_rows += f"<li>{model}: <strong>{_format_price(price)}</strong></li>"
+    lowest_rows = "".join(
+        f"<li>{model}: <strong>{_format_price(price)}</strong></li>"
+        for model, price in sorted(snapshot.get("lowest_by_model", {}).items())
+    )
+    source_status_html = " · ".join(f"{'✅' if ok else '❌'} {src}" for src, ok in source_status.items())
 
     snapshot_html = f"""
-<div style="background:#f0f4ff;border:1px solid #c0d0f0;border-radius:6px;padding:16px;margin-bottom:24px">
+<div style="background:#f0f4ff;border:1px solid #c0d0f0;border-radius:6px;padding:16px;margin:24px 0">
   <h3 style="margin-top:0">📊 Market Snapshot</h3>
-  <p>Total active tracked listings ({SEARCH_RADIUS_MILES} mi): <strong>{snapshot.get("total", 0)}</strong></p>
-  <p>Clean CARFAX (no accidents + 1 owner): <strong>{snapshot.get("great_good_deal_count", 0)}</strong></p>
+  <p>Listed today ({SEARCH_RADIUS_MILES} mi): <strong>{snapshot.get("total", 0)}</strong>
+     · verified no accidents + 1 owner: <strong>{snapshot.get("verified_clean_count", 0)}</strong></p>
+  {f"<ul style='margin-top:0'>{count_items}</ul>" if count_items else ""}
   {f"<p>Lowest price by model today:</p><ul>{lowest_rows}</ul>" if lowest_rows else ""}
   <table style="font-size:13px;border-collapse:collapse">
     <tr><th style="padding:3px 8px;text-align:left">Model / trim</th><th style="padding:3px 8px;text-align:left">Avg price</th></tr>
@@ -348,33 +427,23 @@ def send_daily_digest(
   <p style="font-size:11px;color:#777;margin-bottom:0">Sources: {source_status_html}</p>
 </div>"""
 
-    # Listing cards
-    cards_html = ""
-    sorted_deals = sorted(good_deals, key=lambda l: l.get("composite_score") or 0, reverse=True)
-    for lst in sorted_deals:
-        market_avg = market_avg_for(lst, market_avgs)
-        cards_html += _listing_card_html(lst, market_avg)
-
-    no_deals_msg = ""
-    if not good_deals:
-        no_deals_msg = f"<p style='color:#888'>No listings scored ≥ {SCORE_DAILY_DIGEST} this run. Check back next time.</p>"
-
     body = f"""
 <html><body style="font-family:sans-serif;max-width:640px;margin:0 auto;padding:20px">
   <h1 style="font-size:22px">🔌 PHEV/4xe Deal Digest</h1>
   <p style="color:#666">{today} · ZIP {SEARCH_ZIP} · {SEARCH_RADIUS_MILES} mi radius · {stats.get("new", 0)} new listings · {stats.get("price_drops", 0)} price drops</p>
-  {snapshot_html}
-  <h2>Deals worth seeing ({n})</h2>
+  {changes_html}
+  <h2>Top {len(top)} of {n} deals worth seeing</h2>
   {cards_html}
+  {rest_html}
   {no_deals_msg}
-  <hr style="margin:24px 0">
+  {snapshot_html}
   <p style="font-size:13px;color:#555;background:#fffbe6;padding:12px;border-radius:4px">{REGEN_NOTE}</p>
   <h3 style="margin-top:24px">Jeep 4xe trim guide — winter daily driver scoring</h3>
-  <p style="font-size:12px;color:#777">The Outlander PHEV, Tucson PHEV, and RAV4 Prime ship AWD standard on every
-  trim, so their trim scoring is a lighter nudge (wheel size, standard heated packages) rather than
-  this dedicated table — see <code>scorer.py</code> for those weights.</p>
+  <p style="font-size:12px;color:#777">Grand Cherokee 4xe, Outlander PHEV, Tucson PHEV, and RAV4 Prime ship 4WD/AWD
+  standard on every trim, so their trim scoring is a lighter nudge (wheel size, standard heated packages) rather
+  than this Wrangler table — see <code>scorer.py</code> for those weights.</p>
   {TRIM_GUIDE_HTML}
-  <p style="font-size:11px;color:#999;margin-top:24px">PHEV/4xe Deal Tracker · Runs daily · Scores calibrated for teen driver, Chicago winter conditions</p>
+  <p style="font-size:11px;color:#999;margin-top:24px">PHEV/4xe Deal Tracker · Runs daily · Scores calibrated for teen driver, Chicago winter conditions · "Fair price" = market price for that trim/year adjusted for mileage</p>
 </body></html>"""
 
     return _send_email(subject, body)
